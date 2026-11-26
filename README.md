@@ -16,6 +16,18 @@ npm start              # 打开 http://localhost:8787
 
 服务端没有任何依赖，需要 Node 18 以上。模型走 OpenAI 兼容接口。
 
+默认只有本机能访问。要让同一个 Wi-Fi 下的手机打开，用 `HOST=0.0.0.0 npm start`。
+
+服务拿着你的模型密钥，所以带了几道闸，可以在 `.env` 里调：
+
+| 变量 | 默认 | 含义 |
+|---|---|---|
+| `LLM_PER_MIN` | 30 | 每个地址每分钟最多调多少次模型 |
+| `LLM_BURST` | 20 | 每个地址短时间内最多连发多少次 |
+| `LLM_DAILY_MAX` | 5000 | 所有人加起来每天最多多少次，到顶后游戏退回纯规则 |
+
+要放到公网，建议前面再放一层 Caddy 或 nginx 做 HTTPS，并在模型服务商那边给密钥设消费上限。
+
 ## 目录
 
 | 路径 | 内容 |
@@ -37,4 +49,5 @@ npm start              # 打开 http://localhost:8787
 cd game
 node test/bot.js 2000        # 随机跑 2000 局，检查规则和文本
 node test/ui_smoke.js 200    # 不开浏览器把界面从头点到结局
+node test/server_test.mjs    # 拿畸形请求打服务端，确认不崩、不被绕过
 ```

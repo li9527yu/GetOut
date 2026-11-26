@@ -294,7 +294,7 @@ table.form th{width:6.2em;background:#f4f7fb;font-weight:400;color:var(--mute);w
 .plate p{margin:8px 0 0;font:14px/1.75 var(--song);white-space:pre-line}
 .plate.reveal .art{animation:reveal .9s ease-out both}
 @keyframes reveal{from{opacity:0;filter:brightness(2.2) saturate(0);transform:scale(1.04)}to{opacity:1;filter:none;transform:none}}
-.plate.locked>.art{filter:grayscale(1) brightness(.4) contrast(.75) blur(2.5px)}
+.plate.locked>.art{filter:grayscale(1);opacity:.13}   /* 没解锁的只留一个很淡的影子。原来用模糊，二十几张大图一起模糊，滚动时很吃力 */
 .plate.locked .lbl{background:#111;color:#9aa0a8}
 .plate.locked p{color:#9aa0a8}
 .board{background:#3a3c40;min-height:100%;padding-bottom:28px}
@@ -402,11 +402,12 @@ table.form th{width:6.2em;background:#f4f7fb;font-weight:400;color:var(--mute);w
 @keyframes flashred{0%{background:#f6c9c9}100%{background:#f7f7f7}}
 #app.lv-wash>*{transition:filter .9s ease-in,opacity .9s ease-in;filter:grayscale(1) brightness(.55);opacity:.45}
 /* 10 SAN 越低，界面越发灰、越不稳。字仍然看得清 */
-#app[data-san="1"] .chat,#app[data-san="1"] .status,#app[data-san="1"] .dock{filter:saturate(.7)}
-#app[data-san="2"] .chat,#app[data-san="2"] .status,#app[data-san="2"] .dock{filter:saturate(.38)}
-#app[data-san="3"] .chat,#app[data-san="3"] .status,#app[data-san="3"] .dock{filter:saturate(.12) contrast(1.06)}
-#app[data-san="2"] .chat{animation:sway 7s ease-in-out infinite}
-#app[data-san="3"] .chat{animation:sway 3.6s ease-in-out infinite}
+/* 褪色只加在最外面一层上，不加在会滚动的聊天区上（那样低端手机滚起来会卡）；晃动只留给不滚动的状态栏 */
+#app[data-san="1"]{filter:saturate(.7)}
+#app[data-san="2"]{filter:saturate(.38)}
+#app[data-san="3"]{filter:saturate(.12) contrast(1.06)}
+#app[data-san="2"] .status .bars{animation:sway 7s ease-in-out infinite}
+#app[data-san="3"] .status .bars{animation:sway 3.6s ease-in-out infinite}
 #app[data-san="3"] .msg .bub{text-shadow:.7px 0 0 rgba(196,22,28,.32),-.7px 0 0 rgba(27,75,143,.32)}
 @keyframes sway{0%,100%{transform:none}30%{transform:translateX(1.2px) rotate(.12deg)}65%{transform:translateX(-1px) rotate(-.1deg)}}
 

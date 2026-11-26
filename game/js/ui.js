@@ -19,6 +19,23 @@
 
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const face = (pic, cls) => '<div class="av pic' + (cls ? ' ' + cls : '') + '">' + pic + '</div>';
+  // 头像只画一次，存进页面角落的一张图集，聊天里每个头像只是对它的一次引用。原来每条消息都带一整幅头像，页面大部分体积是它
+  const SPR = {}; let sprHolder = null, sprAll = '';
+  function sprite(key, make) {
+    if (!(key in SPR)) {
+      SPR[key] = null;
+      if (typeof document.createElement === 'function' && document.body) {
+        const full = make(), id = 'fc' + Object.keys(SPR).length;
+        sprAll += '<symbol id="' + id + '" viewBox="36 8 136 136">' + full.slice(full.indexOf('>') + 1, full.lastIndexOf('</svg>')) + '</symbol>';
+        if (!sprHolder) { sprHolder = document.createElement('div'); sprHolder.setAttribute('aria-hidden', 'true'); sprHolder.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden'; document.body.appendChild(sprHolder); }
+        sprHolder.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg"><defs>' + sprAll + '</defs></svg>';
+        SPR[key] = id;
+      }
+    }
+    return SPR[key] ? '<svg class="art face" viewBox="0 0 136 136" aria-hidden="true"><use href="#' + SPR[key] + '"/></svg>' : make();
+  }
+  const fMentor = (t) => sprite('m' + t, () => Art.mentors[t](true)), fMe = () => sprite('me', () => Art.me(true)), fUnknown = () => sprite('unknown', () => Art.unknown(true));
+  const fPeer = (p) => { const k = /师姐$/.test(p.name) ? '师姐' : p.slot; return sprite('p' + k, () => Art.peers[k](true)); };
   const peerArt = (p, crop) => (/师姐$/.test(p.name) ? Art.peers['师姐'] : Art.peers[p.slot])(crop);
   const pips = (n) => '<span class="pips">' + [1, 2, 3, 4, 5].map((i) => '<i class="' + (i <= n ? 'on' : '') + '"></i>').join('') + '</span>';
   const GOAL_CELL = { 就业: '实习', 读博: '发表', 考公: '备考' };
@@ -50,7 +67,7 @@
       + '<div class="hook"><em>' + hook[0] + '</em><span>' + hook[1] + '</span></div>'
       + '<h1>逃出<br>绝命课题组</h1>'
       + '<ul class="facts"><li><b>24</b>周</li><li><b>7</b>种导师</li><li><b>' + C.endingOrder.length + '</b>种结局</li><li><b>1/4</b>的人上岸</li></ul>'
-      + '<div class="pool">' + Object.keys(C.mentors).map((t) => '<span class="' + (META.mentors[t] ? '' : 'un') + '">' + Art.mentors[t](true) + '</span>').join('') + '</div>'
+      + '<div class="pool">' + Object.keys(C.mentors).map((t) => '<span class="' + (META.mentors[t] ? '' : 'un') + '">' + fMentor(t) + '</span>').join('') + '</div>'
       + (can ? '<button class="btn" data-act="resume">接着读（' + esc(termLabelSafe()) + '）</button>' : '')
       + (S && S.ended ? '<button class="btn ghost" data-act="resume">回到上一局的结局：' + esc(S.ended.name) + '</button>' : '')
       + '<button class="btn' + (can ? ' ghost' : '') + '" data-act="new">' + (can ? '重新抽一个导师' : '回他：「在的老师」<small>' + (META.runs ? '再抽一次导师' : '开始读研') + '</small>') + '</button>'
@@ -131,9 +148,9 @@
     return '<div class="bub voice" style="width:' + (70 + sec * 2) + 'px"><i></i><i></i><i></i><span>' + sec + '″</span></div>' + (v[3] ? '<div class="trans"><small>转文字</small>' + esc((v[1] || '') + v[3]) + '</div>' : '');
   }
   function whoInfo(w) {
-    if (w === '导师') return { name: S.mentor.call, av: face(Art.unknown(true), 'sil'), cls: 'mentor' };
+    if (w === '导师') return { name: S.mentor.call, av: face(fUnknown(), 'sil'), cls: 'mentor' };
     const p = Eng.peerBySlot(S, w);
-    if (p) return { name: p.name + (p.state === '附体' ? '（' + S.mentor.call + '组）' : ''), av: face(peerArt(p, true)), cls: p.warned >= 2 || p.state !== '正常' ? 'gone' : '' };
+    if (p) return { name: p.name + (p.state === '附体' ? '（' + S.mentor.call + '组）' : ''), av: face(fPeer(p)), cls: p.warned >= 2 || p.state !== '正常' ? 'gone' : '' };
     return { name: w, av: '<div class="av">' + esc(w.charAt(0)) + '</div>', cls: 'sysmsg' };
   }
   function line(m) {
@@ -143,8 +160,8 @@
     if (m.who === '里程碑') return '<div class="mile"><small>' + esc(m.tag) + '</small>' + esc(m.text) + '</div>';
     if (m.who === '档案' || m.who === '真相') return '<div class="note"><small>' + (m.who === '档案' ? '导师档案 · 新批注' : '导师真相') + '</small>' + esc(m.text) + '</div>';
     // 自己打字的回复才是发出去的消息；点的预设选项只是一个选择，不装成聊天气泡
-    if (m.who === '我' && !(m.free && m.say)) return '<div class="msg me pickrow">' + face(Art.me(true)) + '<div class="pick"><small>' + (m.free ? '你写下的' : '你的选择') + '</small><b>' + esc(m.text) + '</b>' + tag + '</div></div>';
-    if (m.who === '我') return '<div class="msg me">' + face(Art.me(true)) + '<div><div class="bub">' + esc(m.text) + '</div>' + tag + '</div></div>';
+    if (m.who === '我' && !(m.free && m.say)) return '<div class="msg me pickrow">' + face(fMe()) + '<div class="pick"><small>' + (m.free ? '你写下的' : '你的选择') + '</small><b>' + esc(m.text) + '</b>' + tag + '</div></div>';
+    if (m.who === '我') return '<div class="msg me">' + face(fMe()) + '<div><div class="bub">' + esc(m.text) + '</div>' + tag + '</div></div>';
     const w = whoInfo(m.who);
     if (V.waitFlavor && (m.dispatch || m.chatter)) return '<div class="msg ' + w.cls + '">' + w.av + '<div><div class="who">' + esc(w.name) + '</div><div class="bub typing"><span class="busy-dots"><i></i><i></i><i></i></span></div>' + tag + '</div></div>';
     if (/^[（(]撤回了一条消息[）)]$/.test(m.text)) return '<div class="banner"><span>' + esc(w.name) + ' 撤回了一条消息</span></div>';
@@ -191,10 +208,10 @@
     const d = S.cur && S.cur.dm;
     if (!d || d.closed) return '';
     const p = Eng.peerBySlot(S, d.slot), name = p.name + (p.state === '附体' ? '（' + S.mentor.call + '组）' : '');
-    const av = face(peerArt(p, true), p.state !== '正常' ? 'out' : '');
+    const av = face(fPeer(p), p.state !== '正常' ? 'out' : '');
     let h = '<div class="dm" role="dialog" aria-modal="true"><div class="dm-top"><button class="back" data-act="home" aria-label="返回首页">‹</button>' + av + '<b>' + esc(name) + '</b><small>私聊</small></div><div class="dm-body" id="dmbody">';
     d.log.forEach((m) => {
-      if (m.who === '我') h += '<div class="msg me">' + face(Art.me(true)) + '<div><div class="bub">' + esc(m.text) + '</div></div></div>';
+      if (m.who === '我') h += '<div class="msg me">' + face(fMe()) + '<div><div class="bub">' + esc(m.text) + '</div></div></div>';
       else if (m.who === '他') h += '<div class="msg' + (d.kind === 'mad' ? ' mad' : '') + '">' + av + '<div><div class="bub">' + esc(m.text) + '</div></div></div>';
       else if (m.who === '档案') h += '<div class="note"><small>导师档案 · 新批注</small>' + esc(m.text) + '</div>';
       else if (m.who === '真相') h += '<div class="note"><small>导师真相</small>' + esc(m.text) + '</div>';
@@ -359,7 +376,7 @@
         const per = C.personas[p.slot].find((x) => x.name === p.persona);
         const sig = p.state === '发疯' ? (p.inLab ? '在实验室里，但已经不是他了' : '被家里人接走了') : p.state === '退学' ? '已退学' : p.state === '附体' ? '开始替导师说话了'
           : p.warned >= 2 ? '头像灰了，很久没在群里说话' : p.warned === 1 ? '最近话变少了' : (S.intro && S.intro.bios[p.slot]) || per.line;
-        ps += '<div class="peer' + (p.state !== '正常' ? ' out' : '') + '">' + face(peerArt(p, true)) + '<div class="info">' + esc(p.name) + ' · ' + esc(Eng.gearText(S, p.persona)) + '<small>' + esc(sig) + '</small></div><div class="rel">关系 ' + Math.round(p.rel) + '</div></div>';
+        ps += '<div class="peer' + (p.state !== '正常' ? ' out' : '') + '">' + face(fPeer(p)) + '<div class="info">' + esc(p.name) + ' · ' + esc(Eng.gearText(S, p.persona)) + '<small>' + esc(sig) + '</small></div><div class="rel">关系 ' + Math.round(p.rel) + '</div></div>';
       });
       h += fold('同门', Eng.normalPeers(S).length + '/' + S.peers.length + ' 人还在', ps, false);
       h += '<button class="btn ghost" style="width:100%;margin:12px 0 0" data-act="closeSheet">关上档案</button><button class="btn ghost" style="width:100%;margin:8px 0 0;border-color:#c9cdd3;color:var(--mute)" data-act="home">返回首页（进度已保存）</button>';
@@ -449,7 +466,7 @@
             : '<p style="margin:0 0 8px;font-size:13px">你的导师或者同门，说过哪句让你一直记得的话？写下来，以后游戏里的人会说得更像真的。</p>'
               + '<form data-form="quote"><div class="who-row" style="margin:0 0 8px"><span>谁说的：</span>' + ['导师', '同门', '我自己'].map((w, i) => '<label><input type="radio" name="who" value="' + w + '"' + (i ? '' : ' checked') + '> ' + w + '</label>').join('') + '</div>'
               + '<div class="free"><input name="t" maxlength="80" autocomplete="off" placeholder="原话，80 字以内"><button>投稿</button></div></form>'
-              + '<p class="hint" style="margin:8px 0 0">匿名。请不要写真实的姓名、学校和课题组。</p>') + '</div></div>' : '')
+              + '<p class="hint" style="margin:8px 0 0">' + (V.quoteFail ? '<span class="fail">没发出去，可能是发得太快或者网络不通，过一会儿再试。</span>' : '匿名。请不要写真实的姓名、学校和课题组。') + '</p>') + '</div></div>' : '')
         + '<button class="btn" data-act="new">再抽一次</button><button class="btn ghost" data-act="book">打开图鉴</button>';
     }
     return h + '</div></div>';
@@ -540,7 +557,7 @@
     clearInterval(busyTimer);
     busyTimer = setInterval(() => { i = Math.min(i + 1, lines.length - 1); const el = document.getElementById('busytext'); if (el) el.textContent = lines[i]; }, 900);
     const cap = new Promise((r) => setTimeout(() => r(null), capMs || 7000));
-    return Promise.race([promise, cap]).then((v) => { clearInterval(busyTimer); V.busy = null; return v; });
+    return Promise.race([promise, cap]).catch(() => null).then((v) => { clearInterval(busyTimer); V.busy = null; return v; });
   }
   const TYPING = ['消息已发出', '对方正在输入…', '对方停止了输入', '对方正在输入…', '对方还在输入…'];
 
@@ -548,6 +565,9 @@
   function render() {
     const views = { title: vTitle, admit: vAdmit, mentor: vMentor, turn: vTurn, gate: vGate, goal: vGoal, ending: vEnding, book: vBook };
     const was = document.getElementById('chat'), keepTop = was ? was.scrollTop : null;
+    // 后台的模型结果回来会重画页面。重画前记下输入框里已经打的字和光标，画完放回去
+    const typed = [];
+    if (app.querySelectorAll && typeof document.activeElement !== 'undefined') app.querySelectorAll('form[data-form] input[name=t],form[data-form] textarea[name=t]').forEach((el) => { if (el.value || el === document.activeElement) typed.push({ form: el.closest('form').dataset.form, value: el.value, focus: el === document.activeElement, a: el.selectionStart, b: el.selectionEnd }); });
     app.innerHTML = views[V.name]() + vBusy() + vWeekCard();
     // 进场动画、面板滑入、SAN 低时的褪色
     if (app.classList) {
@@ -566,6 +586,7 @@
     let first = null;
     try { first = motion(chat); } catch (e) { /* 动效出错不影响玩 */ }
     const dmb = document.getElementById('dmbody'); if (dmb) dmb.scrollTop = dmb.scrollHeight;
+    typed.forEach((t) => { const el = app.querySelector('form[data-form="' + t.form + '"] [name=t]'); if (!el) return; el.value = t.value; if (t.focus) { el.focus({ preventScroll: true }); try { el.setSelectionRange(t.a, t.b); } catch (e) { /* 有的输入框不支持设光标 */ } } });
     if (V.name === 'title') { try { fitCover(); } catch (e) { /* 量不了尺寸就按原样显示 */ } }
     // 有新消息就停在第一条新消息上，让人从头往下读；没有新消息（比如只是调了精力）就留在原地
     if (chat) {
@@ -615,6 +636,12 @@
     sync();
   }
   function go(name, extra) { V = Object.assign({ name }, extra || {}); render(); }
+  /** 调精力只动底部那一块，不用把整个聊天区重画一遍。 */
+  function redock() {
+    const d = app.querySelector && app.querySelector('#app > .dock'), c = S && S.cur;
+    if (!d || !c || c.event || c.result || c.lostTurn || c.ap <= 0 || V.waitFlavor || V.sheet || V.busy) return render();
+    d.style.animation = 'none'; d.innerHTML = vAlloc();
+  }
   // ---------- 过渡 ----------
   // 换场前先让旧画面退场（加一个 class，等动画放完再换）。测试环境里没有定时器，直接换
   let leaving = false, cardNext = false, weekCard = null, sheetShown = null, dmShown = null, warnSeen = { ref: null, v: false };
@@ -632,16 +659,24 @@
     const t = S.t, y = S.delayed ? '研四' : (['研一', '研二', '研三'][Math.floor(t / 8)] || '研三') + (t % 8 < 4 ? '上' : '下');
     return '<div class="weekcard" style="animation-delay:-' + el + 'ms"><div style="animation-delay:-' + el + 'ms"><small>' + y + '</small><b>' + (S.delayed ? Math.max(1, t - 23) : (t % 4) + 1) + '</b><span>第 ' + (S.delayed ? Math.max(1, t - 23) : t + 1) + ' 周' + (S.delayed ? '（延期）' : ' / 24') + '</span></div></div>';
   }
+  const turnLat = [];
+  function turnWait() {
+    if (!turnLat.length) return 4000;
+    const mid = turnLat.slice().sort((a, b) => a - b)[Math.floor(turnLat.length / 2)];
+    return mid > 4000 ? 1500 : Math.max(1500, Math.min(4000, Math.round(mid * 1.4)));
+  }
   function startTurn() {
     A = null; Eng.beginTurn(S); save();
     if (cardNext && canAnim()) weekCard = { at: Date.now() };
     cardNext = false;
     const run = S, c = S.cur;
     if (LLM && LLM.enabled() && !c.lostTurn) {
-      // 这一周的群聊交给模型改写。最多等 4 秒，等不到就用规则写好的底稿
-      const wait = new Promise((r) => setTimeout(() => r(null), 4000));
+      // 这一周的群聊交给模型改写。等多久看它最近有多快: 平时比它的耗时多等一点，上限 4 秒；它最近总是超过 4 秒，就只等 1.5 秒，直接用规则写好的底稿
+      const cap = turnWait(), t0 = Date.now(), asking = LLM.ask('turn', Eng.flavorContext(S));
+      asking.then((j) => { turnLat.push(j ? Date.now() - t0 : 9999); if (turnLat.length > 3) turnLat.shift(); });
+      const wait = new Promise((r) => setTimeout(() => r(null), cap));
       V = { name: 'turn', waitFlavor: true };
-      Promise.race([LLM.ask('turn', Eng.flavorContext(S)), wait]).then((j) => {
+      Promise.race([asking, wait]).then((j) => {
         if (run !== S || S.cur !== c) return;
         if (j) Eng.applyFlavor(S, j);
         V.waitFlavor = false; save(); if (V.name === 'turn') render();
@@ -720,9 +755,9 @@
       if (LLM && LLM.enabled() && Eng.needsRuling(S, i)) return withBusy(TYPING, LLM.ask('bold', Eng.boldContext(S, i))).then(finish);
       return finish(null);
     },
-    inc(d) { A[d.k] += 1; A.short = A.unblock = A.aiThesis = A.dumpManner = A.dumpSaid = null; A.aiLab = false; restAsk(); render(); },
-    dec(d) { A[d.k] = Math.max(0, A[d.k] - 1); A.short = A.unblock = A.aiThesis = A.dumpManner = A.dumpSaid = null; A.aiLab = false; render(); },
-    helpTo(d) { A.helpTo = d.slot; render(); },
+    inc(d) { A[d.k] += 1; A.short = A.unblock = A.aiThesis = A.dumpManner = A.dumpSaid = null; A.aiLab = false; restAsk(); redock(); },
+    dec(d) { A[d.k] = Math.max(0, A[d.k] - 1); A.short = A.unblock = A.aiThesis = A.dumpManner = A.dumpSaid = null; A.aiLab = false; redock(); },
+    helpTo(d) { A.helpTo = d.slot; redock(); },
     dumpAsk(d) { A.dumpManner = d.m; A.dumpSaid = C.dm.ask[d.m].me; V.sheet = null; confirm(); },
     dm(d) {
       const c = S.cur, dmS = c.dm, run = S, o = dmS && dmS.opts.find((x) => x.k === d.k);
@@ -768,7 +803,7 @@
     goal(d) { Eng.chooseGoal(S, d.g); S.cur = null; save(); cardNext = true; startTurn(); },
     endNext() { V.step = (V.step || 0) + 1; render(); },
   };
-  if (typeof window.addEventListener === 'function') window.addEventListener('resize', () => { if (V.name === 'title') { try { fitCover(); } catch (e) { /* 同上 */ } } });
+  if (typeof window.addEventListener === 'function') { let rz = 0; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { if (V.name === 'title') { try { fitCover(); } catch (e) { /* 同上 */ } } }, 120); }); }
   app.addEventListener('submit', (ev) => {
     ev.preventDefault();
     const text = (new FormData(ev.target).get('t') || '').trim(), kind = ev.target.dataset.form;
@@ -783,7 +818,7 @@
     if (kind === 'quote') {
       const e = S.ended || {}, who = new FormData(ev.target).get('who') || '导师';
       fetch('/quote', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ who, text, college: S.college, mentor: e.mentorType, ending: e.name }) })
-        .then((r) => r.json()).catch(() => ({ ok: false })).then((j) => { if (j && j.ok) V.quoted = (V.quoted || 0) + 1; else V.quoteFail = true; render(); });
+        .then((r) => r.json()).catch(() => ({ ok: false })).then((j) => { if (j && j.ok) { V.quoted = (V.quoted || 0) + 1; V.quoteFail = false; } else V.quoteFail = true; render(); });
       return;
     }
     if (kind === 'dumpAsk') { A.dumpManner = 'plain'; A.dumpSaid = text.slice(0, 40); V.sheet = null; return confirm(); }
@@ -818,5 +853,10 @@
   load();
   go('title');
   if (LLM) LLM.ready.then(() => { if (V.name === 'title') render(); });
+  // 兜底: 哪里出了没想到的错，至少把「正在输入」的遮罩和换场的锁撤掉、把画面重画一遍，不让人卡死在一块点不动的屏幕上
+  if (typeof window.addEventListener === 'function') {
+    const rescue = () => { if (!V.busy && !leaving) return; clearInterval(busyTimer); V.busy = null; leaving = false; try { render(); } catch (e) { /* 连重画都不行就只能刷新了 */ } };
+    window.addEventListener('error', rescue); window.addEventListener('unhandledrejection', rescue);
+  }
   window.__game = { get S() { return S; }, get META() { return META; }, acts, render };
 })();

@@ -22,7 +22,7 @@ const KEY = process.env.LLM_API_KEY || '';
 const MODEL = process.env.LLM_MODEL || 'qwen3.6-flash';              // 快而便宜: 群聊、同门回话、自由回复
 const MODEL_STRONG = process.env.LLM_MODEL_STRONG || MODEL;            // 文笔要求高、又不用玩家等的: 临场事件、结局致谢
 const STRONG_SLOTS = ['event', 'ending', 'intro', 'dump', 'bold', 'peers', 'free_reply', 'dm', 'hole'];      // 要做判断的也用强的，快的那个判断不准
-const TIMEOUT = 25000;
+const TIMEOUT = 15000;                  // 界面最多等 9 秒，再久也没人看了
 
 const WORLD = `你在为一款中文网页文字游戏《逃出绝命课题组》写台词。玩家扮演硕士研究生「萝卜」，在三年里和导师、同门周旋。
 这款游戏的文风有四条规矩，请都遵守：
@@ -188,15 +188,16 @@ const SHAPE = {
   event: '只输出一个 JSON 对象，不要输出别的内容。格式：{"kind":"施压","speaker":"导师","text":"……","options":[{"tone":"怂","text":"……","extra":{"favor":0}},{"tone":"刚","text":"……","extra":{}},{"tone":"歪","text":"……","extra":{}}]}',
 };
 
-async function chat(body) {
+async function chat(body, outer) {
   const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), TIMEOUT);
+  if (outer) { if (outer.aborted) ctl.abort(); else outer.addEventListener('abort', () => ctl.abort(), { once: true }); }   // 玩家走了就不等了
   try {
     const r = await fetch(BASE + '/chat/completions', { method: 'POST', signal: ctl.signal,
       headers: { 'content-type': 'application/json', authorization: 'Bearer ' + KEY }, body: JSON.stringify(body) });
     const j = await r.json().catch(() => null);
     if (!r.ok) { console.error('[llm] 接口报错', r.status, j && j.error ? j.error.message : ''); return null; }
     return j;
-  } catch (err) { console.error('[llm]', err.name === 'AbortError' ? '超时' : err.message); return null; }
+  } catch (err) { if (!(outer && outer.aborted)) console.error('[llm]', err.name === 'AbortError' ? '超时' : err.message); return null; }
   finally { clearTimeout(timer); }
 }
 
@@ -216,56 +217,131 @@ function saveQuote(ip, body) {
   const now = Date.now(), hits = (quoteHits[ip] = (quoteHits[ip] || []).filter((t) => now - t < 60000));
   const text = typeof body.text === 'string' ? body.text.replace(/\s+/g, ' ').trim().slice(0, 100) : '';
   if (hits.length >= 5 || text.length < 4) return false;
+  try { if (fs.statSync(QUOTES).size > LIMIT.quoteFile) return false; } catch (e) { /* 文件还没有，正常 */ }
   hits.push(now);
   const row = { t: new Date(now).toISOString(), who: ['导师', '同门', '我自己'].includes(body.who) ? body.who : '导师', text,
     college: String(body.college || '').slice(0, 20), mentor: String(body.mentor || '').slice(0, 10), ending: String(body.ending || '').slice(0, 20) };
   try { fs.appendFileSync(QUOTES, JSON.stringify(row) + '\n'); return true; } catch (e) { console.error('[投稿] 写不进 quotes.jsonl', e.message); return false; }
 }
 
-async function ask(slot, payload) {
+async function ask(slot, payload, signal) {
+  if (typeof slot !== 'string' || !Object.hasOwn(SLOTS, slot)) return null;
   const def = SLOTS[slot];
-  if (!def) return null;
   const j = await chat({
     model: STRONG_SLOTS.includes(slot) ? MODEL_STRONG : MODEL, temperature: 1.0, max_tokens: 900,
     enable_thinking: false,                      // 要的是快，不要深度思考
     response_format: { type: 'json_object' },
     messages: [{ role: 'system', content: def.system + corpusHint(slot) + '\n' + SHAPE[slot] }, { role: 'user', content: JSON.stringify(payload) }],
-  });
+  }, signal);
   const text = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
   if (!text) return null;
   try { return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch (e) { console.error('[llm] 返回的不是 JSON:', text.slice(0, 80)); return null; }
 }
 
-let healthy = null;                       // 启动后第一次检查时确认配置能不能用
+// 模型能不能用。能用就一直记着；不能用只记 45 秒，免得启动时网络抖一下就整晚没有模型
+let healthy = null, healthAt = 0;
 async function health() {
-  if (healthy === null) {
-    if (!BASE || !KEY) { healthy = false; console.error('[llm] 没有配置 LLM_BASE_URL / LLM_API_KEY，游戏按规则运行。'); }
-    else healthy = !!(await chat({ model: MODEL, max_tokens: 5, enable_thinking: false, messages: [{ role: 'user', content: '在吗' }] }));
-  }
+  if (healthy === true) return true;
+  if (healthy === false && Date.now() - healthAt < 45000) return false;
+  healthAt = Date.now();
+  if (!BASE || !KEY) { if (healthy === null) console.error('[llm] 没有配置 LLM_BASE_URL / LLM_API_KEY，游戏按规则运行。'); healthy = false; }
+  else healthy = !!(await chat({ model: MODEL, max_tokens: 5, enable_thinking: false, messages: [{ role: 'user', content: '在吗' }] }));
   return healthy;
 }
 
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.css': 'text/css; charset=utf-8' };
-const send = (res, code, body, type) => { res.writeHead(code, { 'content-type': type || 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(body); };
+// ---------- 防滥用 ----------
+// 这个服务拿着你的模型密钥。下面几道闸保证: 一个人刷不爆、所有人加起来有每日上限、别的网站不能借访客的浏览器来调。
+const LIMIT = {
+  perMin: +(process.env.LLM_PER_MIN || 30),        // 每个 IP 每分钟最多多少次模型调用（正常玩一周 3 到 5 次）
+  burst: +(process.env.LLM_BURST || 20),           // 每个 IP 短时间内最多连发多少次
+  perIpNow: 6, allNow: 24,                          // 同时在跑的请求数: 每个 IP、全部
+  daily: +(process.env.LLM_DAILY_MAX || 5000),     // 所有人加起来每天最多多少次，到顶后游戏退回纯规则
+  body: 8192,                                       // 模型请求体最大字节数（实测最大的不到 4 KB）
+  quoteFile: 2 * 1024 * 1024,                       // 投稿文件最大 2 MB
+};
+const buckets = new Map(), running = new Map();
+let runningAll = 0, dayKey = '', dayCount = 0;
+function allow(ip) {
+  const now = Date.now(), day = new Date(now).toISOString().slice(0, 10);
+  if (day !== dayKey) { dayKey = day; dayCount = 0; }
+  if (dayCount >= LIMIT.daily) return '今天的总量用完了';
+  const b = buckets.get(ip) || { n: LIMIT.burst, t: now };
+  b.n = Math.min(LIMIT.burst, b.n + (now - b.t) / 60000 * LIMIT.perMin); b.t = now; buckets.set(ip, b);
+  if (b.n < 1) return '这个地址调得太快';
+  if ((running.get(ip) || 0) >= LIMIT.perIpNow || runningAll >= LIMIT.allNow) return '同时在跑的请求太多';
+  b.n -= 1; dayCount += 1;
+  return null;
+}
+setInterval(() => {                                // 每十分钟清一次不再活跃的记录，免得越攒越多
+  const now = Date.now();
+  for (const [ip, b] of buckets) if (now - b.t > 600000) buckets.delete(ip);
+  for (const ip of Object.keys(quoteHits)) if (!quoteHits[ip].some((t) => now - t < 60000)) delete quoteHits[ip];
+}, 600000).unref();
 
-http.createServer(async (req, res) => {
+/** 读请求体。按字节算大小，超了就不读了。 */
+async function readBody(req, max) {
+  const parts = []; let size = 0;
+  for await (const chunk of req) { size += chunk.length; if (size > max) return null; parts.push(chunk); }
+  return Buffer.concat(parts).toString('utf8');
+}
+/** 只接受自己页面发来的 JSON 请求: 别的网站借访客的浏览器发不了带 JSON 头的请求，带了 Origin 的也必须和本站一致。 */
+function sameSite(req) {
+  if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) return false;
+  if (req.headers['sec-fetch-site'] && !/^(same-origin|none)$/.test(req.headers['sec-fetch-site'])) return false;
+  const origin = req.headers.origin;
+  if (origin) { try { if (new URL(origin).host !== req.headers.host) return false; } catch (e) { return false; } }
+  return true;
+}
+
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.css': 'text/css; charset=utf-8' };
+const HEADERS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer',
+  // 页面没有内联脚本，所以脚本只许同源的；样式里有内联 style，放开这一项
+  'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" };
+const send = (res, code, body, type) => { if (res.headersSent || res.destroyed) return; res.writeHead(code, Object.assign({ 'content-type': type || 'application/json; charset=utf-8' }, HEADERS)); res.end(body); };
+
+async function handle(req, res) {
   const url = new URL(req.url, 'http://localhost');
-  if (url.pathname === '/llm/health') return send(res, 200, JSON.stringify({ ok: await health(), model: MODEL, strong: MODEL_STRONG }));
+  const ip = req.socket.remoteAddress || '';
+  if (url.pathname === '/llm/health') return send(res, 200, JSON.stringify({ ok: await health() }));
   if (url.pathname === '/llm' && req.method === 'POST') {
-    let raw = '';
-    for await (const chunk of req) { raw += chunk; if (raw.length > 20000) return send(res, 413, '{"result":null}'); }
+    if (!sameSite(req)) return send(res, 403, '{"result":null}');
+    const raw = await readBody(req, LIMIT.body);
+    if (raw === null) return send(res, 413, '{"result":null}');
     let body; try { body = JSON.parse(raw); } catch (e) { return send(res, 400, '{"result":null}'); }
-    return send(res, 200, JSON.stringify({ result: (await health()) ? await ask(body.slot, body.payload) : null }));
+    // 接入点必须是表里有的那几个名字。用 hasOwn: 不然 constructor、__proto__ 这种也会被当成「有」
+    if (!body || typeof body !== 'object' || typeof body.slot !== 'string' || !Object.hasOwn(SLOTS, body.slot) || body.payload === undefined) return send(res, 400, '{"result":null}');
+    if (!(await health())) return send(res, 200, '{"result":null}');
+    const why = allow(ip);
+    if (why) { console.error('[llm] 拒绝', ip, why); return send(res, 429, '{"result":null}'); }
+    // 玩家不等了（关了页面、超时走了规则）就把发给模型的请求掐掉，不白花钱
+    const ctl = new AbortController(), gone = () => { if (!res.writableEnded) ctl.abort(); };
+    res.on('close', gone);
+    running.set(ip, (running.get(ip) || 0) + 1); runningAll += 1;
+    try { return send(res, 200, JSON.stringify({ result: await ask(body.slot, body.payload, ctl.signal) })); }
+    finally { res.off('close', gone); runningAll -= 1; const n = (running.get(ip) || 1) - 1; if (n > 0) running.set(ip, n); else running.delete(ip); }
   }
   if (url.pathname === '/quote' && req.method === 'POST') {
-    let raw = '';
-    for await (const chunk of req) { raw += chunk; if (raw.length > 2000) return send(res, 413, '{"ok":false}'); }
+    if (!sameSite(req)) return send(res, 403, '{"ok":false}');
+    const raw = await readBody(req, 2000);
+    if (raw === null) return send(res, 413, '{"ok":false}');
     let body; try { body = JSON.parse(raw); } catch (e) { return send(res, 400, '{"ok":false}'); }
-    return send(res, 200, JSON.stringify({ ok: saveQuote(req.socket.remoteAddress || '', body || {}) }));
+    if (!body || typeof body !== 'object') return send(res, 400, '{"ok":false}');
+    return send(res, 200, JSON.stringify({ ok: saveQuote(ip, body) }));
   }
+  if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method not allowed', 'text/plain');
+  if (url.pathname === '/favicon.ico') return send(res, 204, '', 'image/x-icon');   // 浏览器自己会来要，没有就别报错
   // 静态文件: 只放游戏自己的几个文件
-  const rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));
+  let rel; try { rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1)); } catch (e) { return send(res, 400, 'bad request', 'text/plain'); }
   const file = path.join(ROOT, rel);
-  if (!file.startsWith(ROOT + path.sep) || !/^(index\.html|events\.json|js\/[\w.-]+\.js)$/.test(rel) || !fs.existsSync(file)) return send(res, 404, 'not found', 'text/plain');
+  if (!file.startsWith(ROOT + path.sep) || !/^(index\.html|js\/[\w.-]+\.js)$/.test(rel) || !fs.existsSync(file)) return send(res, 404, 'not found', 'text/plain');
   send(res, 200, fs.readFileSync(file), TYPES[path.extname(file)]);
-}).listen(PORT, HOST, () => console.log(`逃出绝命课题组: http://localhost:${PORT}  （模型 ${MODEL} / ${MODEL_STRONG}）`));
+}
+
+// 任何一个请求出了岔子，都只让这一个请求失败，不能把整个服务带倒
+const server = http.createServer((req, res) => {
+  handle(req, res).catch((err) => { console.error('[服务] 请求出错', req.method, String(req.url).slice(0, 80), err && err.message); send(res, err instanceof TypeError && /Invalid URL/.test(err.message) ? 400 : 500, '{"result":null}'); });
+});
+server.requestTimeout = 30000; server.headersTimeout = 10000;
+process.on('unhandledRejection', (err) => console.error('[服务] 没接住的错误', err && err.message));
+process.on('uncaughtException', (err) => console.error('[服务] 没接住的异常', err && err.message));
+server.listen(PORT, HOST, () => console.log(`逃出绝命课题组: http://localhost:${PORT}  （模型 ${MODEL} / ${MODEL_STRONG}；每个地址每分钟 ${LIMIT.perMin} 次，全天 ${LIMIT.daily} 次）` + (HOST === '127.0.0.1' ? '' : '\n注意: 现在局域网里的人都能访问。')));

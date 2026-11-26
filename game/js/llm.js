@@ -10,12 +10,10 @@
  */
 (function () {
   'use strict';
-  let endpoint = null, ok = false;
-  try {
-    endpoint = new URLSearchParams(location.search).get('llm') || localStorage.getItem('escape-lab-llm')
-      || (/^https?:/.test(location.protocol) ? '/llm' : null);          // 用 server.mjs 打开时自动连上
-  } catch (e) { endpoint = null; }
-  const TIMEOUT = 20000;
+  // 只连自己这个站点的 /llm。以前可以用网址参数指到别的服务器上，那样一条链接就能把玩家打的字骗走，去掉了
+  const endpoint = /^https?:/.test(location.protocol) ? '/llm' : null;
+  let ok = false;
+  const TIMEOUT = 10000;                 // 界面最多等 9 秒；到点就断开，服务端会跟着取消对模型的请求
   function call(path, body) {
     const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), TIMEOUT);
     return fetch(endpoint + path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: ctl.signal } : { signal: ctl.signal })
