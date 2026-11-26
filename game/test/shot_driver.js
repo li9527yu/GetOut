@@ -16,6 +16,8 @@ window.__noAnim=true;   // 截图脚本是同步连点的，不能等过渡动�
     result:()=>g.S&&g.S.t>=5&&g.S.cur&&g.S.cur.result&&g.S.cur.result.lines.length>=2,
     short:()=>/怎么交代/.test(app.innerHTML), gate:()=>/stampbox/.test(app.innerHTML)&&/申请表/.test(app.innerHTML), goal:()=>/去向意向/.test(app.innerHTML),
     end0:()=>/学籍状态变更通知/.test(app.innerHTML), end1:()=>/thesis-page/.test(app.innerHTML), end2:()=>/已解密/.test(app.innerHTML), end3:()=>/本次新增归档/.test(app.innerHTML),
+    flow:()=>g.S&&g.S.t%4===2&&!!app.querySelector('.past')&&g.S.cur&&!g.S.cur.result,
+    semcard:()=>g.S&&g.S.t===4&&g.S.cur&&g.S.cur.result&&g.S.cur.result.next==='turn',
     file:()=>false, title:()=>true, book:()=>false };
   const app=document.getElementById('app');
   function click0(){const bs=[...app.querySelectorAll('button[data-act]:not([disabled])')].filter(b=>!['file','hole','book','home','closeSheet','new','tab'].includes(b.dataset.act));const c=bs.find(b=>b.dataset.act==='confirm'&&/就这样|熬过|没有精力/.test(b.textContent));const b=(c&&Math.random()<.6)?c:bs[Math.floor(Math.random()*bs.length)];if(b)b.click();}
@@ -33,6 +35,7 @@ window.__noAnim=true;   // 截图脚本是同步连点的，不能等过渡动�
   if(want==='voice'){const m=g.S.cur.msgs.find(m=>m.dispatch);m.text='@萝卜 〔语音 47″〕'+m.text.replace(/^@\S+\s*/,'');const p=g.S.cur.msgs.find(x=>x.chatter);if(p)p.text='（撤回了一条消息）';g.acts.file({});g.acts.closeSheet({});}
   if(want==='file3'||want==='file4'){g.acts.file({});const sh=app.querySelector('.sheet');const ds=[...sh.querySelectorAll('details')];if(want==='file3'){ds.forEach((d,i)=>d.open=i===2);}else{ds.forEach((d,i)=>d.open=i>=3);}sh.scrollTop=0;}
   if(want==='file5'){g.acts.file({});const sh=app.querySelector('.sheet');[...sh.querySelectorAll('details')].forEach((d,i)=>d.open=i===2);sh.scrollTop=260;}
+  if(want==='semcard'){window.__noAnim=false;const b=app.querySelector('[data-act=next]');if(b)b.click();}
   if(want==='book3'){}
   if(want==='holeshot'){window.Engine.holePost(g.S,'组会讲到第三页他开始看手机。讲完他说：重新讲一遍，我刚才没听。',{san:5,replies:['世另我。','我导是讲到第一页就开始看。'],likes:128,named:false,note:'你把这句话憋了三天。'});g.acts.hole({});}
   if(want==='file2'){g.acts.file({});const sh=app.querySelector('.sheet');if(sh)sh.scrollTop=330;}

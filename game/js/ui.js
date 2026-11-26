@@ -47,12 +47,10 @@
   const GOAL_CELL = { 就业: '实习', 读博: '发表', 考公: '备考' };
   const ATTRS = [['push', 'push 度'], ['res', '资源'], ['fangren', '放人'], ['renpin', '人品'], ['level', '学术水平']];
 
-  function termLabel() {
-    const t = S.t;
-    if (S.delayed) return '研四 · 延期第 ' + Math.max(1, t - 23) + ' 周';
-    const y = ['研一', '研二', '研三'][Math.floor(t / 8)] || '研三', half = t % 8 < 4 ? '上' : '下';
-    return y + ' · ' + half + ' 第 ' + ((t % 4) + 1) + ' 周（' + (t + 1) + '/' + Eng.P.turns + '）';
-  }
+  // 时间一律按学期说: 研一上 · 第 2 周。一学期 4 周，一共 6 个学期
+  const semName = (t) => (t >= 24 ? '研四' : (['研一', '研二', '研三'][Math.floor(t / 8)] || '研三') + (t % 8 < 4 ? '上' : '下'));
+  const wkName = (t) => (t >= 24 ? '研四 · 延期第 ' + (t - 23) + ' 周' : semName(t) + ' · 第 ' + ((t % 4) + 1) + ' 周');
+  function termLabel() { return S.delayed ? wkName(Math.max(24, S.t)) : wkName(S.t) + '（共 4 周）'; }
   function sysTop(crumb) {
     return '<div class="sys-top">研究生教育管理信息系统<small>Graduate Management Information System · 建议使用 IE 8 浏览</small></div>'
       + '<div class="crumb"><span>当前位置：' + crumb + '</span><button data-act="home">返回首页</button></div>';
@@ -215,9 +213,10 @@
     return '<div class="msg ' + w.cls + (m.mood === '胡话' ? ' mad' : '') + '">' + w.av + '<div><div class="who">' + esc(w.name) + '</div>' + bubble(m.text) + tag + '</div></div>';
   }
   const warp = (text) => esc(text);
-  function vTurn() {
+  // 这一周在聊天记录里的全部内容。结算完周数已经加了一，所以有结果时要减回去
+  function chatHTML() {
     const c = S.cur;
-    let chat = c.banner.map((b) => '<div class="banner"><span>' + esc(b) + '</span></div>').join('');
+    let chat = '<div class="wk"><span>' + wkName(c.result ? S.t - 1 : S.t) + '</span></div>' + c.banner.map((b) => '<div class="banner"><span>' + esc(b) + '</span></div>').join('');
     if (c.lostTurn) chat += line({ who: '旁白', text: c.lostWhy === 'sick' ? C.sick.lost : '这一周你都在重做上次没过的材料。别的什么也顾不上。', big: true });
     chat += c.msgs.map(line).join('');
     if (c.moments && c.moments.length) chat += '<div class="moments"><small>朋友圈 · 这学期</small>' + c.moments.map((m) => '<p><b>' + esc(whoInfo(m.who).name) + '</b>　' + esc(m.text) + '</p>').join('') + '</div>';
@@ -228,11 +227,20 @@
       chat += c.eventDone.lines.map(line).join('');
     }
     if (c.result) {
-      chat += c.result.lines.map(line).join('');
+      chat += '<div class="resat"></div>' + c.result.lines.map(line).join('');
       const d = c.result.delta, names = { favor: '导师好感', san: 'SAN', contrib: '组内贡献', thesis: '论文', chips: S.goal ? GOAL_CELL[S.goal] : '去向进度' };
       const parts = Object.keys(names).filter((k) => Math.abs(d[k]) >= 0.5).map((k) => '<span class="' + (d[k] > 0 ? 'up' : 'down') + '">' + names[k] + ' ' + (d[k] > 0 ? '+' : '−') + Math.abs(Math.round(d[k])) + '</span>');
       chat += '<div class="delta">' + (parts.join('') || '<span>这一周什么都没变</span>') + '</div>';
     }
+    return chat;
+  }
+  // 同一个学期里，前几周的聊天记录留在上面，新的一周接在下面
+  let hist = { ref: null, weeks: [] };
+  const pastHTML = () => (hist.ref === S && hist.weeks.length ? '<div class="past">' + hist.weeks.map((w) => '<div class="pw">' + w + '</div>').join('') + '</div>' : '');
+  function keepWeek() { if (hist.ref !== S) hist = { ref: S, weeks: [] }; hist.weeks.push(chatHTML()); if (hist.weeks.length > 3) hist.weeks.shift(); }
+  let autoFlow = false;   // 结算完自动接了下一周: 画面要停在结算那几行上，不能直接滑到新的一周
+  function vTurn() {
+    const c = S.cur, chat = pastHTML() + chatHTML();
     let dock;
     // 群里的话还在生成的时候，先不亮出选项，免得上面在「正在输入」、下面已经让你选了
     if (V.waitFlavor) dock = '<div class="dockwait"><span class="busy-dots"><i></i><i></i><i></i></span>群里有人正在说话…</div>';
@@ -242,7 +250,7 @@
         + (free ? '<form class="free" data-form="free"><input name="t" maxlength="40" autocomplete="off" placeholder="' + (c.event.speaker === '旁白' ? '或者写下你想怎么做……' : '或者自己回一句……') + '"' + '><button' + '>发送</button></form>' : '');
     } else if (c.result) {
       const nx = c.result.next;
-      dock = '<button class="go" data-act="next">' + (nx === 'gate' ? '去交材料' : nx === 'ending' ? '……' : nx === 'goal' ? '新学年' : '下一周') + '</button>';
+      dock = '<button class="go" data-act="next">' + (nx === 'gate' ? '去交材料' : nx === 'ending' ? '……' : nx === 'goal' ? '新学年' : S.t % 4 === 0 ? '下学期' : '下一周') + '</button>';
     } else if (c.lostTurn || c.ap <= 0) {
       dock = '<button class="go" data-act="confirm">' + (c.lostTurn ? '熬过这一周' : '这周没有精力了') + '</button>';
     } else dock = vAlloc();
@@ -336,7 +344,7 @@
       const post = (who, text, meta, extra) => '<div class="hpost"><div class="hw"><b>' + who + '</b><span>' + meta + '</span></div><p>' + esc(text) + '</p>' + (extra || '') + '</div>';
       h = '<h3>树洞</h3><p class="q">学校的匿名树洞。没人知道你是谁。' + (can && S.holeWhy ? '<b>' + esc(S.holeWhy) + '。</b>' : '') + '说得越具体越管用；指名道姓有可能被认出来。</p>'
         + (can ? '<form class="hform" data-form="hole"><textarea name="t" maxlength="100" rows="3" placeholder="想说什么就说吧……"></textarea><button>发出去</button></form>' : '<p class="hint" style="margin:0 0 10px">' + (S.cur && S.cur.holeDone ? '这周已经发过了。' : '现在没什么特别想说的。出了事、撑不住的时候，这里会再打开。') + '</p>')
-        + mine.slice(0, 3).map((x, i) => post('匿名（你）', x.text, '第 ' + (x.t + 1) + ' 周 · ' + x.likes + ' 赞', x.replies.map((r) => '<div class="hr">匿名同学：' + esc(r) + '</div>').join('') + (i === 0 && x.t === S.t ? '<div class="hr ok">' + (x.note ? esc(x.note) + '　' : '') + (x.san ? 'SAN +' + x.san : '没好受多少') + (x.leak ? '　<span class="fail">好像被认出来了</span>' : '') + '</div>' : ''))).join('')
+        + mine.slice(0, 3).map((x, i) => post('匿名（你）', x.text, wkName(x.t) + ' · ' + x.likes + ' 赞', x.replies.map((r) => '<div class="hr">匿名同学：' + esc(r) + '</div>').join('') + (i === 0 && x.t === S.t ? '<div class="hr ok">' + (x.note ? esc(x.note) + '　' : '') + (x.san ? 'SAN +' + x.san : '没好受多少') + (x.leak ? '　<span class="fail">好像被认出来了</span>' : '') + '</div>' : ''))).join('')
         + others.map((t, i) => post('匿名', t, ((seed * 13 + i * 29) % 180 + 6) + ' 赞')).join('')
         + '<button class="btn ghost" style="width:100%;margin:12px 0 0" data-act="closeSheet">关上</button>';
     } else if (V.sheet === 'dumpAsk') {
@@ -384,7 +392,7 @@
       h = '<h3>萝卜的档案</h3><p class="q">' + esc(Eng.collegeOf(S).name) + ' · ' + esc(S.topic) + '</p>' + fold('我', Eng.mood(S) + (S.acadWarn ? ' · 学业预警' : ''), me, true);
       // —— 毕业进度 ——
       const prog = '<table class="form">'
-        + ['开题', '中期考核', '答辩'].map((n, i) => { const g = gl.filter((x) => x.i === i).pop(); return '<tr><th>' + n + '</th><td>' + (g ? (g.pass ? '<span class="pass">已通过</span>' : '<span class="fail">未通过</span>') : '第 ' + ((i + 1) * 8) + ' 周' + (lk.gate === n ? '，还有 ' + lk.left + ' 周。论文' + lk.论文 + '、贡献' + lk.贡献 + '、签字' + lk.签字 : '')) + '</td></tr>'; }).join('')
+        + ['开题', '中期考核', '答辩'].map((n, i) => { const g = gl.filter((x) => x.i === i).pop(); return '<tr><th>' + n + '</th><td>' + (g ? (g.pass ? '<span class="pass">已通过</span>' : '<span class="fail">未通过</span>') : ['研一下', '研二下', '研三下'][i] + '期末' + (lk.gate === n ? '，还有 ' + lk.left + ' 周。论文' + lk.论文 + '、贡献' + lk.贡献 + '、签字' + lk.签字 : '')) + '</td></tr>'; }).join('')
         + '<tr><th>小论文</th><td>' + C.paper.states[pp.state] + (pp.state === 'review' && pp.tries ? '（第 ' + (pp.tries + 1) + ' 次）' : '') + '<br><span style="font-size:12px;color:var(--mute)">答辩前必须录用，否则没有答辩资格。论文进度到 ' + P.paperAt + ' 会投出去，一轮审稿三四周</span></td></tr>'
         + '<tr><th>毕业论文</th><td>' + ML.map((x, i) => '<div>' + mk(i < S.mile) + ' ' + x.name + '</div>').join('') + '</td></tr></table>';
       h += fold('毕业进度', '距' + lk.gate + ' ' + lk.left + ' 周 · 毕业论文 ' + S.mile + '/' + ML.length, prog, true);
@@ -449,8 +457,8 @@
     const ms = Eng.GOAL_MATCH[S.mentor.type], known = S.known.match >= 2;
     const info = {
       就业: ['找工作', '去向进度靠实习来攒。实习的时候人不在组里，被发现要掉导师好感。谈下来「获准实习」就没风险。要瞒，要谈。'],
-      读博: ['去外校读博', '给导师干科研活也算数，但自己最多攒到 60，剩下 40 看他第 23 周给不给写推荐信。要哄。'],
-      考公: ['考公', '和导师无关，不能用 AI。第 19 周国考，去向进度到 70 才算过笔试；没过的话第 21 周还有省考，线是 80。要抢时间。'],
+      读博: ['去外校读博', '给导师干科研活也算数，但自己最多攒到 60，剩下 40 看他研三下第 3 周给不给写推荐信。要哄。'],
+      考公: ['考公', '和导师无关，不能用 AI。研三上第 3 周国考，去向进度到 70 才算过笔试；没过的话研三下第 1 周还有省考，线是 80。要抢时间。'],
     };
     return '<div class="scroll"><div class="sys">' + sysTop('首页 &gt; 培养计划 &gt; 毕业去向意向登记')
       + '<div class="panel"><h2>毕业去向意向登记（研二学年）</h2><div class="body"><p style="margin:0 0 10px;font-size:13px">一年过去了，这个组是什么样，你大概有数了。登记后不可修改。</p>'
@@ -469,7 +477,7 @@
         + '<div class="panel"><h2>学籍状态变更通知</h2><div class="body"><table class="form"><tr><th>姓名</th><td>萝卜</td></tr>'
         + '<tr><th>在读时长</th><td>' + S.stats.turns + ' 周</td></tr><tr><th>学籍状态</th><td>' + esc(STATE_WORD[e.name] || (e.how === 'grad' ? '毕业' : '肄业')) + '</td></tr></table>'
         + '<div class="stampbox"><div class="stamp round' + (e.got ? ' okc' : '') + '">' + esc(e.name.replace('·', '<br>')).replace('&lt;br&gt;', '<br>') + '</div></div></div></div>'
-        + ((e.hl || []).length ? '<div class="panel"><h2>这三年最解气的几件事</h2><div class="body"><ul class="hl">' + e.hl.map((x) => '<li><small>第 ' + (x.t + 1) + ' 周</small>' + esc(x.text) + '</li>').join('') + '</ul></div></div>' : '')
+        + ((e.hl || []).length ? '<div class="panel"><h2>这三年最解气的几件事</h2><div class="body"><ul class="hl">' + e.hl.map((x) => '<li><small>' + wkName(x.t).replace(' · ', '') + '</small>' + esc(x.text) + '</li>').join('') + '</ul></div></div>' : '')
         + (e.how === 'grad' && !e.hand ? '<div class="panel"><h2>毕业典礼</h2><div class="body"><p style="margin:0 0 10px">拨穗之后，导师朝你伸出了手。</p><div class="two"><button class="btn ghost" data-act="hand" data-k="yes">握一下</button><button class="btn ghost" data-act="hand" data-k="no">把手揣回兜里</button></div></div></div>'
           : e.hand ? '<p class="hint" style="font-size:13.5px;color:var(--ink)">' + esc(RB.hand[e.hand]) + '</p>' : '')
         + '<button class="btn" data-act="endNext">翻到论文最后一页</button>';
@@ -639,14 +647,30 @@
     if (V.name === 'title') { try { fitCover(); } catch (e) { /* 量不了尺寸就按原样显示 */ } }
     // 有新消息就停在第一条新消息上，让人从头往下读；没有新消息（比如只是调了精力）就留在原地
     if (chat) {
-      const max = Math.max(0, chat.scrollHeight - chat.clientHeight);
-      chat.scrollTop = first ? Math.min(max, Math.max(0, first.offsetTop - 6)) : keepTop != null ? Math.min(max, keepTop) : max;
+      const max = Math.max(0, chat.scrollHeight - chat.clientHeight), fit = (v) => Math.min(max, Math.max(0, v));
+      const gliding = glideTo && glideTo.cur === S.cur && Date.now() - glideTo.at < 700;
+      if (first) {
+        // 从刚才看的位置滑到第一条新消息，不再整屏跳。新的一周: 上一周往上走，新的一周从底下接上来
+        let goal = fit(first.offsetTop - 6), flowed = false;
+        if (autoFlow && freshWeek && chat.querySelectorAll) { const rs = chat.querySelectorAll('.past .resat'), r = rs[rs.length - 1]; if (r) { goal = fit(r.offsetTop - 6); flowed = true; } }
+        autoFlow = false;
+        const from = flowed && keepTop != null ? fit(keepTop) : weekCard ? goal : freshWeek && chat.querySelector('.past') ? fit(first.offsetTop - chat.clientHeight + 48) : keepTop != null ? fit(keepTop) : goal;
+        glide(chat, from, goal);
+      } else if (gliding && keepTop != null) glide(chat, fit(keepTop), fit(glideTo.top), true);   // 滑到一半画面被重画了，接着滑完
+      else chat.scrollTop = keepTop != null ? fit(keepTop) : max;
       try { moreHint(chat); } catch (e) { /* 提示出不来不影响玩 */ }
     }
     else { const sc = app.querySelector('.scroll'); if (sc && V.name !== 'book') sc.scrollTop = V.name === 'gate' ? sc.scrollHeight : 0; }
   }
   // 数值变了就在条旁边飘一个 +3 / −2；群聊里新来的消息一条条出现
-  let prevBars = null, shown = { ref: null, t: -1, n: 0 };
+  let prevBars = null, shown = { cur: null, n: 0 }, freshWeek = false, glideTo = null;
+  function glide(chat, from, to, keep) {
+    chat.scrollTop = from;
+    if (!keep) glideTo = { cur: S.cur, top: to, at: Date.now() };
+    if (from === to) return;
+    const calm = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+    if (canAnim() && typeof chat.scrollTo === 'function' && !calm) chat.scrollTo({ top: to, behavior: 'smooth' }); else chat.scrollTop = to;
+  }
   function motion(chat) {
     if (V.name !== 'turn' || !app.querySelectorAll) { prevBars = null; return; }
     const now = { ref: S };
@@ -661,13 +685,15 @@
     });
     prevBars = now;
     if (!chat) return;
-    if (shown.ref !== S || shown.t !== S.t) shown = { ref: S, t: S.t, n: 0 };
+    // 认「这一周」要看 S.cur 是不是同一个，不能看周数: 结算时周数会先加一，那时候还是同一周的聊天
+    freshWeek = shown.cur !== S.cur;
     const kids = chat.children;
-    for (let i = shown.n; i < kids.length; i++) { const dl = (weekCard ? 0.4 : 0) + Math.min(1.8, (i - shown.n) * 0.26); kids[i].classList.add('in'); kids[i].style.animationDelay = dl + 's'; kids[i].style.setProperty('--d', dl + 's'); }
+    if (freshWeek) shown = { cur: S.cur, n: kids.length && kids[0].classList && kids[0].classList.contains('past') ? 1 : 0 };
+    for (let i = shown.n; i < kids.length; i++) { const dl = (weekCard ? 0.75 : autoFlow && freshWeek ? 0.7 : 0) + Math.min(1.8, (i - shown.n) * 0.26); kids[i].classList.add('in'); kids[i].style.animationDelay = dl + 's'; kids[i].style.setProperty('--d', dl + 's'); }
     const first = kids[shown.n] || null, fresh = kids.length - shown.n;
     // 新消息一条条出来，底下的选项等最后一条出来了再亮
     const dockEl = app.querySelector('#app > .dock') || app.querySelector('.dock');
-    if (dockEl && fresh >= 2 && !V.waitFlavor && !(S.cur && S.cur.dm && !S.cur.dm.closed)) { dockEl.style.animation = 'msgin .3s ease-out ' + ((weekCard ? 0.4 : 0) + Math.min(1.8, (fresh - 1) * 0.26) + 0.2).toFixed(2) + 's both'; }
+    if (dockEl && fresh >= 2 && !V.waitFlavor && !(S.cur && S.cur.dm && !S.cur.dm.closed)) { dockEl.style.animation = 'msgin .3s ease-out ' + ((weekCard ? 0.75 : 0) + Math.min(1.8, (fresh - 1) * 0.26) + 0.2).toFixed(2) + 's both'; }
     // 学业预警第一次出现时砸下来
     const ac = app.querySelector('.acad'), wasWarn = warnSeen.ref === S && warnSeen.v;
     if (ac && !wasWarn && warnSeen.ref === S && canAnim()) { ac.classList.add('slam'); const st = app.querySelector('.status'); if (st) st.classList.add('flash'); }
@@ -704,9 +730,10 @@
   function vWeekCard() {
     if (!weekCard || V.name !== 'turn' || typeof Date === 'undefined') return '';
     const el = Date.now() - weekCard.at;
-    if (el > 600) { weekCard = null; return ''; }
-    const t = S.t, y = S.delayed ? '研四' : (['研一', '研二', '研三'][Math.floor(t / 8)] || '研三') + (t % 8 < 4 ? '上' : '下');
-    return '<div class="weekcard" style="animation-delay:-' + el + 'ms"><div style="animation-delay:-' + el + 'ms"><small>' + y + '</small><b>' + (S.delayed ? Math.max(1, t - 23) : (t % 4) + 1) + '</b><span>第 ' + (S.delayed ? Math.max(1, t - 23) : t + 1) + ' 周' + (S.delayed ? '（延期）' : ' / ' + Eng.P.turns) + '</span></div></div>';
+    if (el > 1100) { weekCard = null; return ''; }
+    // 日历只在学期开头翻一页: 第几学期、哪个学期、这学期开头是什么事
+    const t = S.t, late = t >= 24, what = late ? '多出来的一个学期' : ((C.calendar[t + 1] || '').split(' · ')[1] || '开学');
+    return '<div class="weekcard" style="animation-delay:-' + el + 'ms"><div style="animation-delay:-' + el + 'ms"><small>' + (late ? '延期' : '第 ' + (Math.floor(t / 4) + 1) + ' 学期 / 共 6 学期') + '</small><b>' + semName(t) + '</b><span>' + esc(what) + '</span></div></div>';
   }
   const turnLat = [];
   function turnWait() {
@@ -716,7 +743,10 @@
   }
   function startTurn() {
     A = null; Eng.beginTurn(S); save();
-    if (cardNext && canAnim()) weekCard = { at: Date.now() };
+    // 学期开头翻日历、清掉上学期的聊天记录；学期中间直接接着往下聊
+    const semStart = S.t % 4 === 0;
+    if (cardNext && semStart) hist = { ref: S, weeks: [] };
+    if (cardNext && semStart && canAnim()) weekCard = { at: Date.now() };
     cardNext = false;
     const run = S, c = S.cur;
     if (LLM && LLM.enabled() && !c.lostTurn) {
@@ -749,7 +779,11 @@
   function doCommit() {
     const plan = { lab: A.lab, thesis: A.thesis, chips: A.chips, heal: A.heal, help: A.help, slack: A.slack, rewrite: A.rewrite,
       helpTo: A.helpTo, restAct: A.restAct, restLine: restGot(), short: A.short || 'plain', dumpTo: A.dumpTo, dumpManner: A.dumpManner || 'plain', dumpSaid: A.dumpSaid || null, unblock: A.unblock, aiLab: !!A.aiLab, aiThesis: !!A.aiThesis, dumpRuling: A.dumpRuling || null };
-    Eng.commit(S, plan); A = null; V.sheet = null; save(); render();
+    Eng.commit(S, plan); A = null; V.sheet = null; save();
+    // 学期中间结算完不用再点「下一周」: 结果留在上面，下一周直接接在后面。学期末、关卡、结局还是停下来等人点
+    const r = S.cur.result;
+    if (r && r.next === 'turn' && !S.ended && S.t % 4 !== 0) { keepWeek(); autoFlow = true; return startTurn(); }
+    render();
   }
   /** 照这周的写法写到关卡那周，论文够不够线。不够才会问要不要用 AI。 */
   function thesisBehind() {
@@ -800,7 +834,7 @@
       if (!introReady || S.intro) return go('mentor');
       withBusy(['正在查询导师分配结果', '正在连接学院官网…', '该页面访问人数较多…', '正在加载导师主页…'], introReady, 9000).then(() => go('mentor'));
     },
-    enter() { startTurn(); },
+    enter() { cardNext = true; startTurn(); },
     opt(d) {
       const c = S.cur, i = +d.i, run = S;
       const finish = (ruling) => {
@@ -850,7 +884,9 @@
         const g = Eng.gate(S); S.cur.result.next = g.next; save();
         go('gate', { g, beat: 0, enter: 'en-rise' });
       });
-      leave('lv-week', 240, () => { cardNext = true; startTurn(); });
+      if (S.t % 4 === 0) return leave('lv-week', 240, () => { cardNext = true; startTurn(); });
+      // 学期中间: 不换场，把这一周收进记录，下一周接在后面
+      keepWeek(); startTurn();
     },
     gateNext() {
       if (V.beat < 2) { V.beat += 1; return render(); }
