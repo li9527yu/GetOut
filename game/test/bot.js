@@ -40,9 +40,14 @@ function plan(s, c, style) {
   p.unblock = ['mentor', 'peer', 'explore', s.ai.unlocked ? 'ai' : 'explore'][Math.floor(rnd() * 4)];
   return p;
 }
-for (let n = 0; n < N; n++) {
-  const style = styles[n % styles.length];
-  const s = Eng.newGame({});
+// 各种开局: 普通的占一半（上面的统计只算普通局），其余轮着试天龙人、金手指、保底、受苦
+const STARTS = [['天龙人 B1', { tl: 'B1' }], ['天龙人 B2', { tl: 'B2' }], ['天龙人 B3', { tl: 'B3' }], ['天龙人 B4', { tl: 'B4' }], ['天龙人 B5', { tl: 'B5' }], ['假天龙人', { tl: 'B6' }],
+  ['好导师', { good: true }], ['金手指全带', { perks: { know: true, favor: true, senior: true, shield: true, paper: true } }], ['受苦', { hard: true }]];
+const byStart = {}, allMet = Object.keys(C.mentors).reduce((o, k) => { o[k] = true; return o; }, {});
+for (let n0 = 0; n0 < N * 2; n0++) {
+  const special = n0 >= N, n = n0 % N, style = special ? ['balanced', 'obey', 'selfish'][n % 3] : styles[n % styles.length];
+  const st = special ? STARTS[n % STARTS.length] : null;
+  const s = Eng.newGame(special ? { opts: JSON.parse(JSON.stringify(st[1])), met: n % 2 ? allMet : null, grudge: n % 3 ? null : '青椒卷王', legacy: n % 2 === 0 } : {});
   let guard = 0;
   while (!s.ended && guard++ < 60) {
     const c = Eng.beginTurn(s);
@@ -69,6 +74,7 @@ for (let n = 0; n < N; n++) {
   }
   if (!s.ended) { problems.push('没有结局: t=' + s.t + ' phase=' + s.phase); continue; }
   if (/\{/.test(s.ended.text)) problems.push('结局变量没替换: ' + s.ended.name);
+  if (special) { const q = (byStart[st[0]] = byStart[st[0]] || { n: 0, got: 0, grad: 0, ends: {} }); q.n++; if (s.ended.got || s.ended.joy || s.ended.cat === '天龙人') q.got++; if (s.ended.how === 'grad') q.grad++; q.ends[s.ended.name] = (q.ends[s.ended.name] || 0) + 1; continue; }
   ends[s.ended.name] = (ends[s.ended.name] || 0) + 1;
   const b = (byMentor[s.origType] = byMentor[s.origType] || { n: 0, got: 0 });
   b.n++; if (s.ended.got) b.got++;
@@ -79,6 +85,7 @@ console.log('局数', N, ' 平均回合', (turnsTotal / N).toFixed(1), ' 平均�
 console.log('\n结局分布:'); C.endingOrder.forEach((k) => console.log('  ' + k.padEnd(12, '　') + ((ends[k] || 0) * 100 / N).toFixed(1) + '%'));
 console.log('\n各导师上岸率（机器人水平，仅供参考）:'); Object.keys(byMentor).forEach((k) => console.log('  ' + k + ' ' + (byMentor[k].got * 100 / byMentor[k].n).toFixed(0) + '%  (' + byMentor[k].n + ' 局)'));
 console.log('\n称号:', JSON.stringify(titles));
+console.log('\n各种开局（上岸或爽局 / 毕业 / 最常见的三个结局）:'); Object.keys(byStart).forEach((k) => { const q = byStart[k]; console.log('  ' + k.padEnd(8, '　') + (q.got * 100 / q.n).toFixed(0).padStart(3) + '% / ' + (q.grad * 100 / q.n).toFixed(0).padStart(3) + '%  ' + Object.keys(q.ends).sort((x, y) => q.ends[y] - q.ends[x]).slice(0, 3).map((e) => e + ' ' + q.ends[e]).join('，')); });
 const never = C.events.filter((e) => !evSeen[e.id] && e.id !== 'node_first_omen').map((e) => e.id);
 console.log('\n事件总数', C.events.length, ' 从未出现:', never.join(', ') || '无');
 // 配套检查: 加了一个结局、导师、称号、活动，却忘了配图或配套文本，界面会直接空白。这里一次查全

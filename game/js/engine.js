@@ -114,7 +114,7 @@
     生活: ['有对象', '异地恋', '养猫', '健身习惯', '夜猫子', '游戏搭子'],
   };
   const HARD_TRAITS = ['双非逆袭', '跨专业', '调剂生', '助学贷款', '异地恋', '拖延症', '社恐', '讨好型'];
-  const SCORE = { 旷野: 80, 旷野肄业: 60, 上岸: 100, 延毕上岸: 70, 想开了: 60, 毕业即失业: 50, 延毕失业: 35, 退出: 20, 状态: 10 };
+  const SCORE = { 爽: 130, 天龙人: 90, 换了个老板: 60, 旷野: 80, 旷野肄业: 60, 上岸: 100, 延毕上岸: 70, 想开了: 60, 毕业即失业: 50, 延毕失业: 35, 退出: 20, 状态: 10 };
   const DIFF = { 神仙导师: 0.5, 佛系放养: 0.6, 帽子大牛: 1.0, 行政领导: 1.3, 控制狂: 1.5, 青椒卷王: 1.5, 横向老板: 1.8 };
   const ATTR_KEY = { push: 'push', 资源: 'res', 放人度: 'fangren', 人品: 'renpin', 水平: 'level', 匹配: 'match' };
   const SLOTS = ['小导', '师兄', '同级', '师弟'];
@@ -171,6 +171,64 @@
     s.known = { push: 0, res: 0, fangren: 0, renpin: 0, level: 0, match: 0 };
   }
 
+  // ---------- 重生、天龙人、爽局 ----------
+  /** 高光时刻: 这一局里最解气的几件事，结局页单独列出来。 */
+  function hl(s, text) { s.hl = s.hl || []; s.hl.push({ t: s.t, text }); if (s.hl.length > 8) s.hl.shift(); }
+  /** 导师的气色（隐藏）。顶赢了、整活了都会掉；掉到底他请一周病假。 */
+  function vex(s, n) { if (s.mentor.type === '神仙导师') return; s.mhp = clampN((s.mhp == null ? 100 : s.mhp) - n, 0, 100); }
+  /** 天龙人的待遇还在不在（假的穿帮以后就没有了）。 */
+  const tlOn = (s) => !!s.tl && (s.tl !== 'B6' || !!s.fake);
+  function joyInit(s) {
+    if (s.mhp == null) s.mhp = 100;
+    s.hl = s.hl || []; s.stats.pranks = s.stats.pranks || 0;
+    if (s.tl === undefined) s.tl = null;
+    if (s.rich === undefined) s.rich = null;
+  }
+  /** 开局时把这一局的特殊待遇安上: 天龙人身份、买的金手指、上辈子留下的东西。 */
+  function applyStart(s, meta) {
+    const o = meta.opts || {}, perks = o.perks || {};
+    joyInit(s);
+    s.hard = !!o.hard;
+    if (s.hard) { s.favor -= 5; return; }
+    if (o.tl && C.rebirth.tls[o.tl]) {
+      s.tl = o.tl;
+      if (o.tl === 'B1') { s.favorFloor = 60; s.autoSign = true; s.favor = Math.max(s.favor, 70); s.peers.forEach((p) => { p.rel = Math.max(5, p.rel - 15); }); }
+      if (o.tl === 'B2') { s.noChores = true; s.favorFloor = 50; s.favor = Math.max(s.favor, 65); }
+      if (o.tl === 'B3') { s.thesis = 40; s.cleared = 1; s.paperSure = true; s.favor += 10; }
+      if (o.tl === 'B4') { s.favorFloor = 70; s.favor = 80; s.bargain = 99; }
+      if (o.tl === 'B5') { ['push', 'res', 'fangren', 'renpin', 'level', 'match'].forEach((k) => { s.known[k] = 2; }); s.blindImmune = true; s.favor += 10; s.signPenalty = -15; }
+      if (o.tl === 'B6') { s.fake = true; s.noChores = true; s.favorFloor = 55; s.favor = Math.max(s.favor, 60); s.queue.push({ id: 'tl_fake_check', due: 11 }); }
+      if (o.tl === 'B2') s.queue.push({ id: 'tl_reverse', due: 5 });
+    }
+    if (perks.know) { s.flags.knowType = true; ['push', 'res', 'fangren', 'renpin', 'level'].forEach((k) => { s.known[k] = Math.max(s.known[k] || 0, 1); }); }
+    if (perks.favor) s.favor += 15;
+    if (perks.shield) s.warnShield = 1;
+    if (perks.paper) s.paperSure = true;
+    if (perks.senior) { const p = peerBySlot(s, '师兄'); if (p) p.rel = 85; s.shield = (s.shield || 0) + 2; }
+    // 带着记忆重生: 这种导师以前遇到过，底细开局全知道
+    if (meta.met && meta.met[s.mentor.type]) { ['push', 'res', 'fangren', 'renpin', 'level', 'match'].forEach((k) => { s.known[k] = 2; }); s.metBefore = true; s.queue.push({ id: 'reborn_know', due: 1 }); }
+    // 复仇局: 上一局就是栽在这种导师手里
+    if (meta.grudge && meta.grudge === s.mentor.type) s.revenge = true;
+    // 前世的遗产
+    if (meta.legacy) {
+      const L = pick(C.rebirth.legacy);
+      if (L[0] === 'thesis') s.thesis = Math.max(s.thesis, Math.min(thesisCap(s) - 1, s.thesis + 10));
+      if (L[0] === 'ai') s.ai.unlocked = true;
+      if (L[0] === 'senior') { const p = peerBySlot(s, '师兄'); if (p) p.rel = clampN(p.rel + 20, 0, 100); }
+      s.legacy = { text: L[1], tag: L[2] };
+    }
+    s.favor = clampN(s.favor, s.favorFloor, 100);
+  }
+  /** 第一周开头，把这一局的特殊情况交代一下。 */
+  function startNotes(s, say) {
+    if (s.tl) say('旁白', C.rebirth.tls[s.tl].first.replace('X 总', '萝总'), '天龙人开局：' + C.rebirth.tls[s.tl].name);
+    if (s.legacy) say('旁白', s.legacy.text, s.legacy.tag);
+    if (s.metBefore) say('旁白', C.rebirth.met, '带着记忆重生：他的底细你开局就知道');
+    if (s.revenge) say('旁白', C.rebirth.revenge, '复仇局：顶回去的成功率 +20%');
+    if (s.hard) say('旁白', '这一局你什么都没带。', '受苦模式：SAN 掉得更快，重生点翻倍');
+  }
+  const CS_LIKE = ['计算机科学与技术学院', '电子信息学院', '生物医学工程学院', '机械工程学院', '能源与动力工程学院', '材料科学与工程学院'];
+
   // ---------- 存档版本 ----------
   // 存档就是状态 s。每次给 s 加了新字段、或者改了字段的意思，把 SAVE_V 加一，并在 migrate 里写清楚老存档怎么补。
   // 读档只走 migrate 这一个入口: 认不出来的存档返回 null，由界面决定怎么办。
@@ -179,7 +237,7 @@
     if (!s || typeof s !== 'object' || typeof s.t !== 'number' || !s.mentor || !Array.isArray(s.peers) || !s.stats || !s.flags || !Array.isArray(s.traits)) return null;
     if (!C.mentors[s.mentor.type] || s.peers.some((p) => !p || SLOTS.indexOf(p.slot) < 0)) return null;
     // 1 → 2: 课题组之外、生病、里程碑和小论文、学院、明信片、树洞、私聊，都是后来加的
-    wildInit(s); mileInit(s);
+    wildInit(s); mileInit(s); joyInit(s);
     if (!C.colleges.some((x) => x.name === s.college)) s.college = C.colleges[0].name;
     s.cards = s.cards || {}; s.hole = s.hole || []; s.queue = s.queue || []; s.mem = s.mem || []; s.known = s.known || {}; s.seenEvents = s.seenEvents || []; s.gen = s.gen || []; s.genEvents = s.genEvents || {};
     s.dmCd = s.dmCd || 0;
@@ -199,7 +257,8 @@
     s.nao = a[0]; s.gan = a[1];
     s.xintai = Math.min(5, a[2] + has(s, '双非逆袭') + has(s, '助学贷款'));
     s.renqing = Math.min(5, a[3] + has(s, '工作后读研') + has(s, '社牛'));
-    setMentor(s, wpick(Object.keys(POOL), Object.values(POOL)));
+    { const o = meta.opts || {};                          // 买了爽一局、或者轮到保底: 必是好导师；甲方身份必是横向老板
+      setMentor(s, o.tl === 'B4' ? '横向老板' : o.good && !o.hard ? pick(['神仙导师', '佛系放养']) : wpick(Object.keys(POOL), Object.values(POOL))); }
     s.origType = s.mentor.type;
     const col = pick(C.colleges);
     s.college = col.name; s.topic = pick(col.topics);
@@ -225,6 +284,7 @@
     wildInit(s);
     s.omenSlot = null; s.lastFull = false; s.ended = null; s.cur = null; s.phase = 'intro';
     if (has(s, '高校教师子女')) s.known[pick(['push', 'res', 'fangren', 'renpin', 'level'])] = 1;
+    applyStart(s, meta);
     return s;
   }
 
@@ -248,7 +308,10 @@
   function paperResult(s, c, say) {
     const pp = s.paper, m = s.mentor, r = rnd();
     const pa = clampN(P.paperBase + P.paperPerLevel * m.level + P.paperPerNao * s.nao - aiRate(s) / 200 + P.paperPerTry * pp.tries, 0.1, 0.9);
-    if (r < pa) {
+    if (r < pa || s.paperSure) {
+      s.paperSure = false;
+      // 顶会最佳论文: 方向对、脑子够、运气好
+      if (!s.bestPaper && CS_LIKE.indexOf(collegeOf(s).name) >= 0 && s.nao >= 4 && rnd() < (s.tl === 'B3' ? 0.8 : 0.25)) { s.bestPaper = true; s.favorFloor = Math.max(s.favorFloor, 80); say('期刊编辑部', C.rebirth.bestPaper[0], '最佳论文'); say('导师', C.rebirth.bestPaper[1], '从现在起，是他求着你'); hl(s, '拿了最佳论文'); }
       pp.state = 'accepted'; c.favor += 4; s.san = Math.min(s.sanMax, s.san + 8);
       if (s.goal === '读博') addChips(s, 10);
       say('期刊编辑部', pick(C.paper.accept), '小论文录用了：导师好感 +4，SAN +8' + (s.goal === '读博' ? '，发表 +10' : ''));
@@ -627,6 +690,7 @@
     if (d && s.t % 8 === R.winterTurn && s.mentor.fangren >= R.winterFangren) { d -= 1; c.winterOff = true; }
     c.demand = d; c.kinds = [];
     for (let i = 0; i < d; i++) c.kinds.push(wpick(['杂活', '科研', '项目'], s.mentor.weights));
+    if (s.noChores) { c.kinds = c.kinds.filter((k) => k !== '杂活'); c.demand = c.kinds.length; }   // 天龙人: 杂活不敢派给你
     c.tasks = [];                                           // 同一周不派两件一样的活
     c.kinds.forEach((k) => { const left = C.tasks[k].filter((x) => c.tasks.indexOf(x) < 0); c.tasks.push(pick(left.length ? left : C.tasks[k])); });
   }
@@ -635,9 +699,10 @@
     const t = s.t, stage = stageOf(s);
     const c = { msgs: [], favor: 0, sanLoss: 0, event: null, banner: [], picked: false };
     s.cur = c; s.phase = 'turn';
-    wildInit(s); mileInit(s);
+    wildInit(s); mileInit(s); joyInit(s);
     if (t % 8 === 0) s.leaves = 0;                         // 请假次数按学年算
     const say = (who, text, tag) => c.msgs.push({ who, text: fill(s, text), tag });
+    if (t === 0) startNotes(s, say);
     // 日历横幅
     const cal = C.calendar[t + 1];
     if (cal && !s.delayed) c.banner.push(cal);
@@ -702,6 +767,18 @@
       reveal(s, '人品', c.msgs);
     }
     rollDemand(s, c);
+    // 导师被气到请病假: 这一周没人派活
+    if (s.mhp <= 0 && !c.lostTurn && s.mentor.type !== '神仙导师') {
+      s.mhp = 60; c.demand = 0; c.kinds = []; c.tasks = []; c.mentorOff = true;
+      c.banner.push('导师请了病假'); say('旁白', pick(C.rebirth.sickLeave), '这周没人派活'); see(s, 3); hl(s, '把导师气得请了一周病假');
+    }
+    if (s.tl === 'B2' && t > 0 && t % 4 === 0) say('院长', pick(C.rebirth.dean), '');
+    if (s.bestPaper && t % 3 === 0 && !c.mentorOff) say('导师', pick(C.rebirth.beg), '他现在求着你');
+    // 大结果: 去向做满了以后，小概率来一个离谱的机会
+    if (stage >= 2 && !s.delayed && s.goal === '就业' && s.chips >= 100 && !c.lostTurn) {
+      if (!s.flags.bigOffer && s.seenEvents.indexOf('big_offer') < 0 && rnd() < (s.tl ? 0.5 : 0.12)) s.queue.unshift({ id: 'big_offer', due: t });
+      else if (!s.flags.startup && s.seen >= 50 && s.seenEvents.indexOf('startup') < 0 && rnd() < 0.12) s.queue.unshift({ id: 'startup', due: t });
+    }
     // 上周自己打字说的那句话，这周有人又提起来
     if (s.echo) { const ecp = s.echo.who === '导师' || s.echo.who === '旁白' || (peerBySlot(s, s.echo.who) || {}).state === '正常'; if (ecp && !c.lostTurn) say(s.echo.who, s.echo.text, '上周你说「' + s.echo.said + '」的余波'); s.echo = null; }
     // 关系跌到底的同门会报复
@@ -890,7 +967,7 @@
       const p = peerBySlot(s, fx.help === '他' ? c.event && c.event.slot : fx.help);
       if (p) { p.pressure = clampN(p.pressure + P.helpPressure, 0, 100); p.rel = clampN(p.rel + P.helpRel, 0, 100); addAssim(s, P.helpAssim); note(p.name + ' 关系 +' + P.helpRel); }
     }
-    if (fx.evidence && s.evidence < R.evidenceCap) { s.evidence += 1; note('留了一份证据'); }
+    if (fx.evidence && s.evidence < R.evidenceCap) { s.evidence += 1; note('留了一份证据'); if (s.evidence === 1 && s.seenEvents.indexOf('report_box') < 0) s.queue.push({ id: 'report_box', due: s.t + 3 }); }
     if (fx.unlock === 'ai' && !s.ai.unlocked) { s.ai.unlocked = true; note('解锁 AI'); }
     if (fx.ai_rate) s.thesisAi = clampN(s.thesisAi + fx.ai_rate * s.thesis / 100, 0, s.thesis);
     if (fx.bargain) { s.bargain = Math.max(s.bargain, fx.bargain); note('接下来几周派活 −1'); }
@@ -931,7 +1008,7 @@
     const edge = clampN(Math.round(num(ruling && ruling.edge)), -20, 20);
     if (out && edge >= 10) out.tags.push('这话说在了点子上');
     if (out && edge <= -10) out.tags.push('这话说得不是时候');
-    return EV.boldBase + EV.boldPer * (s.renqing + s.mentor.fangren) + edge / 100;
+    return EV.boldBase + EV.boldPer * (s.renqing + s.mentor.fangren) + edge / 100 + (s.revenge ? 0.2 : 0);
   }
   function boldContext(s, idx) {
     const w = freeContext(s), o = getEv(s, s.cur.event.id).options[idx];
@@ -945,7 +1022,7 @@
     c.picked = true;
     applyKind(s, c, e, out);
     let ok = true;
-    if (o.special) ok = special(s, c, o.special, out);
+    if (o.special) ok = special(s, c, o.special, out, o);
     else if (!o.effects && !o.check || e.gen) {            // 按口气的默认效果
       if (o.tone === '怂') applyFx(s, c, EV.meek, out);
       else if (o.tone === '刚') {
@@ -1000,7 +1077,7 @@
     applyKind(s, c, e, out);
     let ok = true;
     if (tone === '怂') applyFx(s, c, EV.meek, out);
-    else if (tone === '刚') { ok = rnd() < boldChance(s, judged, out); applyFx(s, c, ok ? EV.boldOk : EV.boldFail, out); }
+    else if (tone === '刚') { ok = rnd() < boldChance(s, judged, out); applyFx(s, c, ok ? EV.boldOk : EV.boldFail, out); if (ok) { vex(s, 8); if (s.revenge) hl(s, '顶了回去，他没接上话'); } }
     else { applyFx(s, c, EV.odd, out); if (rnd() < EV.oddBackfire) applyFx(s, c, { favor: EV.oddFavor }, out); }
     // 这句话本身带来的后果: 模型按内容给，这里逐项截断。顶回去没顶动时，好处不算数；推掉活只有顶成了才算
     const tw = judged.effects || judged.twist || {}, lim = (k, n) => clampN(Math.round(num(tw[k])), -n, n);
@@ -1052,6 +1129,7 @@
     const m = s.mentor;
     return { 导师: { 类型: m.type, 称呼: m.call, push度: m.push, 人品: m.renpin, 放人度: m.fangren, 水平: m.level },
       时间: C.calendar[s.t + 1] || ('第 ' + (s.t + 1) + ' 周'), 学年: stageOf(s) + 1, 专业背景: field(s), 目标: s.goal || '还没定',
+      萝卜的特殊情况: [s.tl ? '全组都知道萝卜是天龙人（' + C.rebirth.tls[s.tl].name + '），导师对他格外客气' : '', s.bestPaper ? '萝卜拿了最佳论文，现在是导师求着他' : '', s.rich ? '萝卜认识了一个很有钱的人，全组都知道' : '', s.mhp <= 35 ? '导师最近被萝卜气得不轻' : ''].filter(Boolean),
       毕业论文做到: s.mile ? C.milestones[s.mile - 1].name : '刚开始读文献', 小论文: C.paper.states[(s.paper || {}).state || 'none'], 离下一关: (() => { const o = outlook(s); return o.gate + '还有 ' + o.left + ' 周，论文' + o.论文 + '、贡献' + o.贡献 + '、签字' + o.签字; })(),
       萝卜: { 词条: s.traits, 好感: Math.round(s.favor), SAN: Math.round(s.san), 心态: mood(s), 昵称: nickname(s) },
       同门: s.peers.map((p) => ({ 位置: p.slot, 名字: p.name, 人设: p.persona, 状态: p.state, 压力: band(p.pressure, 50, 75), 和萝卜的关系: band(p.rel, 30, 60), 被萝卜甩过锅: p.dumped || 0,
@@ -1163,7 +1241,7 @@
     return true;
   }
 
-  function special(s, c, kind, out) {
+  function special(s, c, kind, out, opt) {
     const L = out.lines;
     switch (kind) {
       case 'goal_就业': case 'goal_读博': case 'goal_考公': {
@@ -1171,6 +1249,65 @@
         return true;
       }
       case 'switch_defer': s.flags.switch_deferred = true; return true;
+      // —— 整活: SAN 必涨，导师的气色必掉。可能被查出来，也可能歪打正着。有铁同门一起干，更不容易被查到 ——
+      case 'prank': {
+        const pk = (opt && opt.pk) || [], ally = normalPeers(s).filter((p) => p.rel >= 60)[0], r = rnd(), caught = ally ? 0.12 : 0.25;
+        s.stats.pranks += 1; s.san = Math.min(s.sanMax, s.san + 8); vex(s, 18); see(s, 2); addAssim(s, -3);
+        out.tags.push('SAN +8');
+        if (r < caught) {
+          const loss = ally ? 5 : 10; c.favor -= loss;
+          L.push({ who: '旁白', text: pk[2] || pick(C.prankFallback.bad) }); L.push({ who: '导师', text: pick(C.prankFallback.bad) });
+          if (ally) { ally.rel = clampN(ally.rel - 5, 0, 100); L.push({ who: ally.slot, text: fill(s, C.prankFallback.ally, { 他: ally.name }), tag: '他替你扛了一半' }); }
+          out.tags.push('被查出来了', '导师好感 −' + loss); remember(s, '萝卜干了一件很离谱的事，被他查出来了');
+          return false;
+        }
+        if (r < caught + 0.2) { s.bargain = Math.max(s.bargain, 3); c.favor += 2; L.push({ who: '旁白', text: pk[1] || pk[0] || '' }); out.tags.push('歪打正着', '接下来几周派活 −1'); hl(s, '整活歪打正着：' + (opt ? opt.text : '')); return true; }
+        L.push({ who: '旁白', text: pk[0] || '' }); out.tags.push('没人发现'); hl(s, '整活成功：' + (opt ? opt.text : ''));
+        return true;
+      }
+      case 'fake_bluff': {
+        if (rnd() < 0.35 + 0.1 * s.renqing) { L.push({ who: '旁白', text: C.rebirth.fakeOk }); out.tags.push('圆过去了', '他们更信了'); s.favorFloor = 60; hl(s, '假身份没有穿帮'); return true; }
+        return special(s, c, 'fake_fail', out, opt);
+      }
+      case 'fake_fail': {
+        s.fake = false; s.noChores = false; s.favorFloor = 0; c.favor -= 25; c.sanLoss += 10;
+        normalPeers(s).forEach((p) => { p.rel = clampN(p.rel + 12, 0, 100); });
+        L.push({ who: '旁白', text: C.rebirth.fakeFail }); out.tags.push('穿帮了', '导师好感 −25', 'SAN −10', '同门反而跟你亲近了');
+        remember(s, '发现萝卜根本没有背景，之前白客气了');
+        return false;
+      }
+      case 'report': {
+        const r = rnd();
+        if (r < 0.1) { vex(s, 50); s.bargain = Math.max(s.bargain, 6); s.flags.reported = true; L.push({ who: '学院通知', text: '近期收到关于个别导师的反映，学院已约谈相关人员。请各位导师引以为戒。' }); out.tags.push('有人看了那封信', '接下来几周派活 −1'); hl(s, '匿名信起作用了'); return true; }
+        if (r < 0.22) { c.favor -= 20; L.push({ who: '导师', text: '意见箱里那封信，字迹我认得。' }); out.tags.push('被认出来了', '导师好感 −20'); remember(s, '萝卜往意见箱里投过他的材料'); return false; }
+        L.push({ who: '旁白', text: '信投进去了。意见箱没有发出任何声音。' }); out.tags.push('石沉大海');
+        return true;
+      }
+      // —— 有钱人线 ——
+      case 'rich_yes': {
+        if (rnd() < 0.15) { s.queue.push({ id: 'rich_scam', due: s.t + 2 }); L.push({ who: '旁白', text: '他说话很客气，每天早晚各问候一次。' }); return true; }
+        const kind = s.mentor.type === '横向老板' && rnd() < 0.5 ? '甲方' : rnd() < 0.15 ? '导师的孩子' : '普通';
+        s.rich = { ctrl: 0, kind }; s.queue.push({ id: 'rich_gift', due: s.t + 2 });
+        L.push({ who: '旁白', text: '他说话很客气，每天早晚各问候一次。' }); out.tags.push('认识了一个出手很大方的人');
+        return true;
+      }
+      case 'rich_gift': {
+        if (!s.rich) return true;
+        s.flags.richCare = true;                           // 不用再为补助发愁
+        if (s.rich.kind === '甲方') { s.favorFloor = Math.max(s.favorFloor, 70); L.push({ who: '导师', text: '那位……是我们项目的甲方。你们认识？怎么不早说。' }); out.tags.push('他是导师的甲方', '导师不敢得罪你了'); hl(s, '发现他是导师的甲方'); }
+        else if (s.rich.kind === '导师的孩子') { c.favor += 20; s.queue.push({ id: 'rich_inlaw', due: s.t + 3 }); L.push({ who: '旁白', text: '全组里只有导师没笑。他盯着那张卡片上的字迹看了很久。' }); out.tags.push('他是导师的孩子', '导师好感 +20'); }
+        s.queue.push({ id: 'rich_report', due: s.t + 3 });
+        return true;
+      }
+      case 'rich_ctrl': {
+        if (!s.rich) return true;
+        s.rich.ctrl += 1; c.sanLoss += 3; addAssim(s, 4);
+        out.tags.push('SAN −3', s.rich.ctrl >= 2 ? '你又有了一个要汇报的人' : '他很满意');
+        if (s.seenEvents.indexOf('rich_plan') < 0) s.queue.push({ id: 'rich_plan', due: s.t + 3 });
+        return true;
+      }
+      case 'rich_stay': { if (s.rich && s.seenEvents.indexOf('rich_plan') < 0) s.queue.push({ id: 'rich_plan', due: s.t + 3 }); return true; }
+      case 'rich_end': { s.rich = null; s.flags.richCare = false; L.push({ who: '旁白', text: '他没有再发消息。朋友圈也看不到了。' }); out.tags.push('这条线断了'); hl(s, '对有钱人说了不'); return true; }
       case 'fraud_do': {
         s.fraud = s.fraud || { n: 0, t: s.t }; s.fraud.n += 1;
         if (blocked(s)) { s.cleared += 1; s.explore = 0; s.unblockMethod = null; }
@@ -1575,7 +1712,8 @@
       L.push({ who: '旁白', text: told || pick(C.restActs[act].lines), tag: wildCount(s, dir) + (s.wildDoor === dir && s.wild[dir] >= P.wildEnd ? '，那条路走得通了' : '') });
       if (newCard) L.push({ who: '明信片', act, text: C.cardNote[act], tag: '新明信片 · ' + act + '（' + Object.keys(s.cards).length + '/' + Object.keys(C.restActs).length + '）' });
       if (!full && !shielded && rnd() < P.restSeenPerPush * s.mentor.push) { favor -= 2; L.push({ who: '导师', text: pick(C.lines.restSeen), tag: '活没干完还发了朋友圈，导师好感 −2' }); }
-      if (!wildCheck(s, dir) && rnd() < P.wildEventChance) {
+      if (!s.rich && s.t >= 4 && s.seenEvents.indexOf('rich_meet') < 0 && !s.queue.some((q) => q.id === 'rich_meet') && rnd() < 0.06) s.queue.push({ id: 'rich_meet', due: t + 1 });
+      else if (!wildCheck(s, dir) && rnd() < P.wildEventChance) {
         const pool = C.events.filter((e) => e.layer === '旷野' && e.dir === dir && e.once !== false && !/_circle$/.test(e.id) && eligible(s, e));
         if (pool.length) s.queue.push({ id: pick(pool).id, due: t + 1 });
       }
@@ -1619,7 +1757,7 @@
 
     // SAN
     s.san = Math.min(s.sanMax, s.san + healRate(s) * (restOff ? 0 : g('heal')) + slackRate(s) * slack);
-    let drain = (s.fraud ? P.fraudDrain * s.fraud.n : 0) + (stage < 3 ? P.sanDrain[stage] : P.sanDrainExtra) + (s.gan === 5 ? 1 : 0) + has(s, '异地恋') + has(s, '夜猫子')
+    let drain = (s.hard ? 1 : 0) + (s.fraud ? P.fraudDrain * s.fraud.n : 0) + (stage < 3 ? P.sanDrain[stage] : P.sanDrainExtra) + (s.gan === 5 ? 1 : 0) + has(s, '异地恋') + has(s, '夜猫子')
       - has(s, '有对象') - has(s, '健身习惯');
     drain += P.sanMadPeer * s.peers.filter((p) => p.state === '发疯' && p.inLab).length;
     if (has(s, '养猫') && t % 8 === 4) drain += 6;
@@ -1645,8 +1783,9 @@
     }
     mileInit(s); mileStep(s, L);
     // 统一扣 SAN，截断
-    const loss = Math.min(P.sanLossCap, c.sanLoss * sanMult);
+    const loss = Math.min(P.sanLossCap, c.sanLoss * sanMult) * (tlOn(s) ? 0.5 : 1);   // 天龙人: 有退路的人不那么容易崩
     s.san -= loss;
+    if (tlOn(s) && s.san < 20) s.san = 20;
     clampAll(s);
     s.t += 1;
     if (s.delayed) s.extraLeft -= 1;
@@ -1746,6 +1885,8 @@
         if (over > 0 && rnd() < over * P.aiRateSlope) { ok = false; res.blind = true; }
       }
     }
+    // 天龙人: 条件不够也给过。学院会「研究一下」
+    if (!ok && tlOn(s)) { ok = true; res.waived = true; res.blind = false; s.blindFail = false; if (i === 2 && s.paper.state !== 'accepted') s.paper.state = 'accepted'; hl(s, res.name + '没达标，学院特批通过'); }
     res.pass = ok;
     mileInit(s); s.gateLog.push({ i, pass: ok }); if (!ok) openHole(s, res.name + '没有通过');
     see(s, ok ? P.seenGatePass : P.seenGateFail); s.seen = clampN(s.seen, 0, 100);
@@ -1755,7 +1896,7 @@
       finish(s, 'dropout'); res.next = 'ending'; return res;
     }
     if (!ok && i < 2) {
-      s.acadWarn = true; res.warned = true;
+      if (s.warnShield) { s.warnShield = 0; res.spared = true; } else { s.acadWarn = true; res.warned = true; }
       s.lost = P.gateFailLostTurns; s.san -= P.sanGateFail;
       res.consequence = '记学业预警一次。下学期前 2 周用来重做，SAN −' + P.sanGateFail + '。再有一关不过，直接清退';
       if (s.san <= 0) { finish(s, 'mad'); res.next = 'ending'; return res; }
@@ -1786,6 +1927,7 @@
   function blindReview(s) {
     const over = aiRate(s) - P.aiRateLine;
     s.flags.blind_done = true;
+    if (s.blindImmune) return true;                         // 学术世家: 评审专家都认识你
     if (s.fraud && !s.fraud.caught && rnd() < P.fraudBlind * s.fraud.n) { s.blindFail = true; s.fraud.blind = true; return false; }
     if (over > 0 && rnd() < over * P.aiRateSlope) { s.blindFail = true; return false; }
     return true;
@@ -1820,6 +1962,23 @@
     const plain = ['毕业即失业', '延毕失业', '延毕上岸', '上岸·进厂', '上岸·去外校读博', '上岸·考上了', '想开了·躺平毕业', '想开了·退学', '肄业', '主动退学'];
     const wildEnd = wildReady(s) && plain.indexOf(name) >= 0;
     if (wildEnd) { name = { 户外: '旷野·进山', 文艺: '旷野·剧场', 人: '旷野·回家' }[s.wildDoor]; cat = how === 'grad' ? '旷野' : '旷野肄业'; }
+    // 爽局: 这些结局比普通的上岸高一档。按从稀有到常见的顺序看，命中一个就用它
+    const paperOk = (s.paper || {}).state === 'accepted', gradOk = how === 'grad' && !s.stayAccepted && s.assim < P.assimEnd;
+    let joy = null;
+    if (gradOk && s.unionOk && (s.evidence >= 3 || s.flags.reported)) joy = '把导师送进去';
+    else if (gradOk && name === '一个都没少' && s.stats.help >= 6) joy = '全员上岸';
+    else if (gradOk && s.bestPaper) joy = '顶会最佳论文';
+    else if (gradOk && got && s.goal === '读博' && paperOk && s.mentor.level >= 4 && rnd() < 0.4) joy = '人才计划';
+    else if (gradOk && got && s.flags.startup) joy = '导师来给你打工';
+    else if (gradOk && got && s.flags.bigOffer) joy = '年薪千万';
+    else if (gradOk && s.thesis >= 100 && aiRate(s) === 0 && !s.fraud && paperOk && (s.paper.tries || 0) === 0 && s.mentor.level >= 4 && rnd() < 0.5) joy = '写进教科书';
+    if (joy) { name = joy; cat = '爽'; }
+    // 有钱人: 报备了两次以上，结局就是他
+    const kept = !joy && s.rich && s.rich.ctrl >= 2 && how !== 'mad' && plain.concat(['旷野·进山', '旷野·剧场', '旷野·回家']).indexOf(name) >= 0;
+    if (kept) { name = '换了个老板'; cat = '换了个老板'; }
+    // 天龙人: 顺顺当当毕业了，没有别的更特别的结局
+    const tlEnd = !joy && !kept && how === 'grad' && tlOn(s) && ['熬走了他', '联名信', '二进宫', '一个都没少'].indexOf(name) < 0;   // 苦结局轮不到天龙人
+    if (tlEnd) { name = '天龙人'; cat = '天龙人'; }
     // 改过数据、又顺利毕业了的: 有一定概率在毕业以后被查出来
     const exposed = how === 'grad' && s.fraud && !s.fraud.caught && plain.concat(['旷野·进山', '旷野·剧场', '旷野·回家', '一个都没少', '二进宫']).indexOf(name) >= 0 && rnd() < Math.min(0.8, P.fraudEnd * s.fraud.n);
     if (exposed) { name = '东窗事发'; cat = '状态'; }
@@ -1829,7 +1988,9 @@
     const grade = score >= 120 ? 'S' : score >= 90 ? 'A' : score >= 60 ? 'B' : score >= 30 ? 'C' : 'D';
     const st = s.stats;
     let title = null;
-    if (got && (s.origType === '控制狂' || s.origType === '横向老板') && how === 'grad') title = '地狱归来';
+    if (s.revenge && how === 'grad') title = '这次没让他得逞';
+    else if ((s.stats.pranks || 0) >= 5) title = '整活大师';
+    else if (got && (s.origType === '控制狂' || s.origType === '横向老板') && how === 'grad') title = '地狱归来';
     else if (got && how === 'grad' && st.ai === 0 && st.slack === 0) title = '老实人';
     else if (st.shorts === 0 && st.turns >= 8) title = '好的老师';
     else if (st.help >= 10) title = '实验室之光';
@@ -1841,7 +2002,7 @@
       师兄状态: senior ? C.peerFate[senior.state] : '', 周数: st.turns };
     const E = C.endings[name];
     s.ended = { name, cat, how, got, score, grade, coef: Math.round(coef * 10) / 10, baseScore, title,
-      text: fill(s, wildEnd && how !== 'grad' ? E.textGone : E.text, vars) + (how === 'grad' && s.fraud && !exposed ? C.fraud.endNote.replace('\\n', '\n') : ''), fraud: s.fraud ? s.fraud.n : 0, cards: Object.keys(s.cards || {}), wild: wildEnd ? s.wildDoor : null, stats: { demand: st.demand, alive: peersOk, peers: s.peers.length, slack: st.slack },
+      text: fill(s, (wildEnd && !joy && !kept && !tlEnd && how !== 'grad') || (kept && how !== 'grad') || (tlEnd && s.tl === 'B6') ? E.textGone : E.text, vars).replace(/X 总/g, '萝总') + (how === 'grad' && s.fraud && !exposed ? C.fraud.endNote.replace('\\n', '\n') : ''), fraud: s.fraud ? s.fraud.n : 0, joy: !!joy, tl: s.tl, hard: !!s.hard, hl: (s.hl || []).slice(-5), pranks: s.stats.pranks || 0, cards: Object.keys(s.cards || {}), wild: wildEnd ? s.wildDoor : null, stats: { demand: st.demand, alive: peersOk, peers: s.peers.length, slack: st.slack },
       mentorType: s.origType, finalType: s.mentor.type, truth: s.truth,
       attrs: { push: s.mentor.push, 资源: s.mentor.res, 放人度: s.mentor.fangren, 人品: s.mentor.renpin, 水平: s.mentor.level, 匹配: s.goal ? GOAL_MATCH[s.mentor.type][s.goal] : '—' },
       lastRun: { kind: how === 'mad' ? 'mad' : how === 'grad' ? (name.indexOf('留组') === 0 ? 'stay' : 'grad') : 'gone' } };
@@ -1849,7 +2010,7 @@
     return s.ended;
   }
 
-  return { SAVE_V, migrate, P, R, EV, ARCH, GOAL_MATCH, POOL, TRAITS, EVENTS,
+  return { hl, vex, tlOn, SAVE_V, migrate, P, R, EV, ARCH, GOAL_MATCH, POOL, TRAITS, EVENTS,
     newGame, beginTurn, pickOption, pickFree, canFreeReply, freeContext, endingContext, flavorContext, applyFlavor, applyPeerLines, worldContext, eventContext, needsRuling, boldContext, dumpContext, introContext, applyIntro, addGenerated, dumpRefuseChance, commit, gate, chooseGoal, blindReview, finish,
     stageOf, cells, mood, nickname, blocked, thesisCap, exploreCost, aiRate, canSlack, landed, chipsCap,
     normalPeers, peerBySlot, fill, cond, canHole, holeContext, holePost, dmPick, dmContext, wildCount, outlook, collegeOf, gearText, restContext, wildReady, leaveChance, sickChance, healRate, slackRate, thesisRate, chipsRate, has };

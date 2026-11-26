@@ -3,7 +3,7 @@
   'use strict';
   const Eng = window.Engine, C = window.CONTENT, LLM = window.LLM, Art = window.Art, app = document.getElementById('app');
   const KEY = 'escape-lab-v1';
-  let S = null, META = { endings: {}, mentors: {}, titles: [], cards: {}, last: null, recent: [], runs: 0 };
+  let S = null, META = { endings: {}, mentors: {}, titles: [], cards: {}, last: null, recent: [], runs: 0, pts: 0, streak: 0, grudge: null };
   let V = { name: 'title' };          // 当前画面
   let A = null;                       // 本回合的精力分配
   let introReady = null;              // 开局的导师主页还在生成时，这里是那个请求
@@ -14,7 +14,8 @@
       const d = JSON.parse(localStorage.getItem(KEY) || 'null');
       if (!d) return;
       const m = d.META && typeof d.META === 'object' ? d.META : {}, obj = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : {});
-      META = { endings: obj(m.endings), mentors: obj(m.mentors), titles: Array.isArray(m.titles) ? m.titles : [], cards: obj(m.cards), last: m.last || null, recent: Array.isArray(m.recent) ? m.recent : [], runs: +m.runs || 0 };
+      META = { endings: obj(m.endings), mentors: obj(m.mentors), titles: Array.isArray(m.titles) ? m.titles : [], cards: obj(m.cards), last: m.last || null, recent: Array.isArray(m.recent) ? m.recent : [], runs: +m.runs || 0,
+        pts: Math.max(0, Math.min(999, Math.floor(+m.pts || 0))), streak: Math.max(0, Math.floor(+m.streak || 0)), grudge: typeof m.grudge === 'string' && C.mentors[m.grudge] ? m.grudge : null };
       // 这一局的进度交给引擎认: 老版本的补齐字段，认不出来的另存一份（万一还想找回来），然后当作没有进行中的局
       S = d.S ? Eng.migrate(d.S) : null;
       if (d.S && !S) { try { localStorage.setItem(KEY + '-bad', JSON.stringify(d.S)); } catch (e) { /* 存不下就算了 */ } }
@@ -75,7 +76,7 @@
       + '<div class="pool">' + Object.keys(C.mentors).map((t) => '<span class="' + (META.mentors[t] ? '' : 'un') + '">' + fMentor(t) + '</span>').join('') + '</div>'
       + (can ? '<button class="btn" data-act="resume">接着读（' + esc(termLabelSafe()) + '）</button>' : '')
       + (S && S.ended ? '<button class="btn ghost" data-act="resume">回到上一局的结局：' + esc(S.ended.name) + '</button>' : '')
-      + '<button class="btn' + (can ? ' ghost' : '') + '" data-act="new">' + (can ? '重新抽一个导师' : '回他：「在的老师」<small>' + (META.runs ? '再抽一次导师' : '开始读研') + '</small>') + '</button>'
+      + '<button class="btn' + (can ? ' ghost' : '') + '" data-act="new">' + (can ? '重新抽一个导师' : '回他：「在的老师」<small>' + (META.runs ? '再抽一次导师' : '开始读研') + (META.runs === 0 ? ' · 第一次必是天龙人' : META.runs === 1 ? ' · 这一次必是好导师' : pity() ? ' · 保底：这一局可免费换好导师' : META.pts ? ' · 重生点 ' + META.pts : '') + '</small>') + '</button>'
       + '<button class="btn ghost" data-act="book">图鉴 ' + Object.keys(META.endings).length + '/' + C.endingOrder.length + '</button>'
       + '</div></div>';
   }
@@ -92,6 +93,43 @@
   }
   function termLabelSafe() { try { return termLabel(); } catch (e) { return ''; } }
 
+  // ---------- 重生 ----------
+  // 第一局必是天龙人，第二局必是好导师；之后每局开始前可以拿重生点换东西。连着几局没上岸，下一局保底好导师
+  const RB = C.rebirth;
+  const pity = () => (META.streak || 0) >= RB.pity;
+  function rbCost(sel) {
+    if (sel.mode === 'hard') return 0;
+    return Object.keys(sel.perks).reduce((n, k) => n + (sel.perks[k] ? RB.perks[k].cost : 0), 0) + (sel.mode === 'tl' ? RB.tl.cost : sel.mode === 'good' && !pity() ? RB.good.cost : 0);
+  }
+  function vReborn() {
+    const sel = V.sel, pts = META.pts || 0, cost = rbCost(sel), left = pts - cost, hard = sel.mode === 'hard';
+    const row = (act, key, on, name, desc, price, dis) => '<button class="rb' + (on ? ' on' : '') + '"' + (dis && !on ? ' disabled' : '') + ' data-act="' + act + '" data-k="' + key + '"><i></i><span><b>' + esc(name) + '</b><small>' + esc(desc) + '</small></span><em>' + price + '</em></button>';
+    return '<div class="scroll"><div class="sys">' + sysTop('首页 &gt; 重生办事大厅 &gt; 第 ' + (META.runs + 1) + ' 次读研')
+      + '<div class="panel"><h2>重生点：' + pts + (cost ? '　<span style="font-weight:400;font-size:13px">这次用 ' + cost + '，剩 ' + left + '</span>' : '') + '</h2><div class="body">'
+      + '<p style="margin:0 0 10px;font-size:13px;color:var(--mute)">每读完一次都会攒下重生点：上岸 1 点，普通毕业 2 点，没毕业 3 点。越惨攒得越快。'
+      + (pity() ? '<br><b style="color:var(--stamp)">你已经连着 ' + META.streak + ' 局没上岸了。这一局可以免费换一个好导师。</b>' : '') + '</p>'
+      + '<div class="rbs">' + row('rbMode', 'good', sel.mode === 'good', RB.good.name, RB.good.desc, pity() ? '保底 免费' : RB.good.cost + ' 点', !pity() && left < RB.good.cost - (sel.mode === 'tl' ? RB.tl.cost : 0))
+      + row('rbMode', 'tl', sel.mode === 'tl', RB.tl.name, RB.tl.desc, RB.tl.cost + ' 点', left < RB.tl.cost - (sel.mode === 'good' && !pity() ? RB.good.cost : 0))
+      + '</div><div class="rbs">' + Object.keys(RB.perks).map((k) => row('rbPerk', k, !!sel.perks[k], RB.perks[k].name, RB.perks[k].desc, RB.perks[k].cost + ' 点', hard || left < RB.perks[k].cost)).join('')
+      + '</div><div class="rbs">' + row('rbMode', 'hard', hard, RB.hard.name, RB.hard.desc, '点数 ×2', false) + '</div>'
+      + '</div></div>'
+      + '<button class="btn" data-act="rbGo">' + (cost ? '就这样，重生' : hard ? '空着手进组' : '什么都不换，直接重生') + '</button><button class="btn ghost" data-act="home">回首页</button></div></div>';
+  }
+  /** 真的开一局。opts 是这一局的特殊待遇。 */
+  function launch(opts, fromTitle) {
+    opts = opts || {};
+    // 没花点数、也没选受苦: 有很小的概率天生就是天龙人（包括假的）
+    if (!opts.tl && !opts.hard && !opts.good && Math.random() < 0.04) opts.tl = 'B' + (1 + Math.floor(Math.random() * 6));
+    const met = Object.keys(META.mentors).reduce((o, k) => { o[k] = true; return o; }, {});
+    S = Eng.newGame({ truths: Object.keys(META.mentors).reduce((o, k) => { o[k] = META.mentors[k].truths; return o; }, {}), recent: [].concat.apply([], META.recent || []),
+      opts, met, grudge: META.grudge || null, legacy: META.runs >= 2 && !opts.hard && Math.random() < 0.4 });
+    S.lastRun = META.last; S.startKind = opts.kind || ''; save();
+    const run = S;                                                        // 导师主页和同门小传在后台现写
+    introReady = LLM && LLM.enabled() ? LLM.ask('intro', Eng.introContext(S)).then((j) => { if (run === S && j && Eng.applyIntro(S, j)) save(); }) : null;
+    if (fromTitle) return leave('lv-unlock', 380, () => go('admit', { enter: 'en-up' }));   // 像解锁手机一样划开
+    go('admit');
+  }
+
   // ---------- 开局 ----------
   function vAdmit() {
     const a = S.baseAttrs;
@@ -100,7 +138,9 @@
       + '<p style="margin:0 0 10px;font-family:var(--song)">萝卜 同学：<br>　　经审核，你已被我校<b>' + esc(Eng.collegeOf(S).name) + '</b>录取为硕士研究生，研究方向：' + esc(S.topic) + '。请按期报到。</p>'
       + '<table class="form"><tr><th>脑子</th><td>' + pips(a.nao) + '</td></tr><tr><th>肝</th><td>' + pips(a.gan) + '</td></tr>'
       + '<tr><th>抗压</th><td>' + pips(a.xintai) + '</td></tr><tr><th>情商</th><td>' + pips(a.renqing) + '</td></tr>'
-      + '<tr><th>个人情况</th><td>' + S.traits.map((t) => '<span class="tag">' + esc(t) + '<small>' + esc(C.traitDesc[t] || '') + '</small></span>').join('') + '</td></tr></table>'
+      + '<tr><th>个人情况</th><td>' + S.traits.map((t) => '<span class="tag">' + esc(t) + '<small>' + esc(C.traitDesc[t] || '') + '</small></span>').join('') + '</td></tr>'
+      + (S.tl ? '<tr><th>备注</th><td><b style="color:var(--stamp)">' + esc(RB.tls[S.tl].note.replace('{姓}', '萝')) + '</b></td></tr>' : '') + '</table>'
+      + (S.tl || S.startKind || S.hard ? '<p style="margin:10px 0 0;font-size:13px">' + (S.tl ? '这一局你是<b>天龙人</b>（' + esc(RB.tls[S.tl].name) + '）。' : '') + esc(S.startKind || '') + (S.hard ? '受苦模式：什么都没带，重生点翻倍。' : '') + '</p>' : '')
       + '</div></div><p class="hint">脑子决定效率，肝决定每周有几点精力，抗压决定扛得住多久，情商决定求人和谈条件。</p>'
       + '<button class="btn" data-act="toMentor">查看导师分配结果</button></div></div>';
   }
@@ -109,7 +149,7 @@
     const col = Eng.collegeOf(S), own = [S.topic].concat(col.topics.filter((x) => x !== S.topic).slice(0, 1)).concat(base.dirs.split('、')[0]).join('、');
     const prof = { title: base.title, stipend: base.stipend, dirs: it.dirs || own, motto: it.motto || base.motto, review: it.review || base.review };
     return '<div class="scroll"><div class="sys">' + sysTop('首页 &gt; 师资队伍 &gt; 导师信息')
-      + '<div class="panel"><h2>' + esc(m.surname + m.given) + '</h2><div class="portrait sil">' + Art.unknown() + '<span class="lbl">' + esc(m.surname + m.given) + '</span></div><div class="body"><table class="form">'
+      + '<div class="panel"><h2>' + esc(m.surname + m.given) + '</h2>' + (S.flags.knowType ? '<div class="portrait">' + Art.mentors[m.type]() + '<span class="lbl">' + esc(m.type) + '</span></div>' : '<div class="portrait sil">' + Art.unknown() + '<span class="lbl">' + esc(m.surname + m.given) + '</span></div>') + '<div class="body"><table class="form">'
       + '<tr><th>所在学院</th><td>' + esc(col.name) + '</td></tr>'
       + '<tr><th>职称</th><td>' + esc(prof.title) + '</td></tr>'
       + '<tr><th>研究方向</th><td>' + esc(prof.dirs) + '</td></tr>'
@@ -117,7 +157,8 @@
       + '<tr><th>学生评价</th><td>' + esc(prof.review) + '</td></tr>'
       + '<tr><th>补助</th><td>' + esc(prof.stipend) + '</td></tr>'
       + '<tr><th>其他</th><td class="pending" style="animation:none">进组后才知道</td></tr></table></div></div>'
-      + '<p class="hint">照片还没上传。他到底是什么样的导师，要靠你自己一点点试出来，毕业那天才看得清。试出来的会记在「导师档案」里。</p>'
+      + (S.flags.knowType ? '<p class="hint">你提前打听过了：他是「' + esc(m.type) + '」。' + esc(base.review || '') + '</p>' : '')
+      + '<p class="hint"' + (S.flags.knowType ? ' hidden' : '') + '>照片还没上传。他到底是什么样的导师，要靠你自己一点点试出来，毕业那天才看得清。试出来的会记在「导师档案」里。</p>'
       + '<button class="btn" data-act="enter">进组</button></div></div>';
   }
 
@@ -153,7 +194,7 @@
     return '<div class="bub voice" style="width:' + (70 + sec * 2) + 'px"><i></i><i></i><i></i><span>' + sec + '″</span></div>' + (v[3] ? '<div class="trans"><small>转文字</small>' + esc((v[1] || '') + v[3]) + '</div>' : '');
   }
   function whoInfo(w) {
-    if (w === '导师') return { name: S.mentor.call, av: face(fUnknown(), 'sil'), cls: 'mentor' };
+    if (w === '导师') return S.flags.knowType ? { name: S.mentor.call, av: face(fMentor(S.mentor.type)), cls: 'mentor' } : { name: S.mentor.call, av: face(fUnknown(), 'sil'), cls: 'mentor' };
     const p = Eng.peerBySlot(S, w);
     if (p) return { name: p.name + (p.state === '附体' ? '（' + S.mentor.call + '组）' : ''), av: face(fPeer(p)), cls: p.warned >= 2 || p.state !== '正常' ? 'gone' : '' };
     return { name: w, av: '<div class="av">' + esc(w.charAt(0)) + '</div>', cls: 'sysmsg' };
@@ -336,7 +377,10 @@
         + (S.leaves || S.frail ? '<tr><th>病假</th><td>这学年请过 ' + S.leaves + ' 次' + (S.frail ? '。导师觉得你「身体不太行」，组内贡献涨得慢' : '') + '</td></tr>' : '')
         + (S.ai.unlocked ? '<tr><th>AI</th><td>' + (S.ai.banned ? '导师明令禁止' : '能用') + '。论文里的 AI 率 ' + Math.round(Eng.aiRate(S)) + '%</td></tr>' : '')
         + (S.fraud ? '<tr><th>心里的事</th><td><span class="fail">改过 ' + S.fraud.n + ' 次数据</span>。每周多掉 ' + (P.fraudDrain * S.fraud.n) + ' 点 SAN，随时可能被翻出来</td></tr>' : '')
-        + (S.evidence ? '<tr><th>留存的证据</th><td>' + S.evidence + ' 份</td></tr>' : '') + '</table>';
+        + (S.evidence ? '<tr><th>留存的证据</th><td>' + S.evidence + ' 份</td></tr>' : '')
+        + (S.tl ? '<tr><th>身份</th><td><b>天龙人</b>：' + esc(RB.tls[S.tl].name) + (S.tl === 'B6' && !S.fake ? '（已穿帮）' : '') + '</td></tr>' : '') + (S.hard ? '<tr><th>身份</th><td>受苦模式</td></tr>' : '') + (S.revenge ? '<tr><th>旧账</th><td>上一次就栽在这种导师手里。顶回去更容易成</td></tr>' : '')
+        + (S.rich ? '<tr><th>那个有钱人</th><td>' + (S.rich.ctrl >= 2 ? '他什么都要你报备' : S.rich.ctrl ? '他开始问你每天去了哪' : '出手很大方') + '</td></tr>' : '')
+        + (S.mentor.type !== '神仙导师' && S.mhp < 100 ? '<tr><th>导师的气色</th><td>' + (S.mhp >= 70 ? '还行' : S.mhp >= 35 ? '发青' : '<span class="fail">很差，再气一下就要请病假</span>') + '</td></tr>' : '') + '</table>';
       h = '<h3>萝卜的档案</h3><p class="q">' + esc(Eng.collegeOf(S).name) + ' · ' + esc(S.topic) + '</p>' + fold('我', Eng.mood(S) + (S.acadWarn ? ' · 学业预警' : ''), me, true);
       // —— 毕业进度 ——
       const prog = '<table class="form">'
@@ -394,7 +438,7 @@
       + (g.paperNeeded ? '<tr><th>小论文</th><td>' + esc(g.paperState) + '　<span class="' + (g.paperOk ? 'pass' : 'fail') + '">' + (g.paperOk ? '符合要求' : esc(C.paper.gateNo)) + '</span></td></tr>' : '')
       + '<tr><th>导师意见</th><td>' + sign + '</td></tr>'
       + (beat >= 2 && g.blind ? '<tr><th>盲审</th><td><span class="fail">未通过</span>　评审意见：' + esc(C.lines.blindFail) + '</td></tr>' : '')
-      + (beat >= 2 ? '<tr><th>结论</th><td>' + (g.pass ? '<span class="pass">通过</span>' : '<span class="fail">不通过</span>' + (g.consequence ? '　' + esc(g.consequence) : '')) + '</td></tr>' : '')
+      + (beat >= 2 ? '<tr><th>结论</th><td>' + (g.pass ? '<span class="pass">通过</span>' + (g.waived ? '　<span style="font-size:13px;color:var(--mute)">条件未达标。经学院研究，特批通过。</span>' : '') : '<span class="fail">不通过</span>' + (g.consequence ? '　' + esc(g.consequence) : '')) + '</td></tr>' : '')
       + '</table>' + (beat >= 2 ? '<div class="stampbox"><div class="stamp' + (g.pass ? ' okc' : '') + '">' + (g.pass ? '通　过' : '不通过') + '</div></div>' : '') + '</div></div>';
     if (beat >= 1) h += (g.lines || []).map((l) => '<div style="margin-top:12px">' + line(l) + '</div>').join('');
     h += '<button class="btn" data-act="gateNext">' + (beat === 0 ? '查看导师意见' : beat === 1 ? '查看审核结论' : g.next === 'ending' ? '查看学籍状态' : g.next === 'goal' ? '进入研二' : g.i === 2 ? '办理延期毕业' : '继续') + '</button></div></div>';
@@ -425,6 +469,9 @@
         + '<div class="panel"><h2>学籍状态变更通知</h2><div class="body"><table class="form"><tr><th>姓名</th><td>萝卜</td></tr>'
         + '<tr><th>在读时长</th><td>' + S.stats.turns + ' 周</td></tr><tr><th>学籍状态</th><td>' + esc(STATE_WORD[e.name] || (e.how === 'grad' ? '毕业' : '肄业')) + '</td></tr></table>'
         + '<div class="stampbox"><div class="stamp round' + (e.got ? ' okc' : '') + '">' + esc(e.name.replace('·', '<br>')).replace('&lt;br&gt;', '<br>') + '</div></div></div></div>'
+        + ((e.hl || []).length ? '<div class="panel"><h2>这三年最解气的几件事</h2><div class="body"><ul class="hl">' + e.hl.map((x) => '<li><small>第 ' + (x.t + 1) + ' 周</small>' + esc(x.text) + '</li>').join('') + '</ul></div></div>' : '')
+        + (e.how === 'grad' && !e.hand ? '<div class="panel"><h2>毕业典礼</h2><div class="body"><p style="margin:0 0 10px">拨穗之后，导师朝你伸出了手。</p><div class="two"><button class="btn ghost" data-act="hand" data-k="yes">握一下</button><button class="btn ghost" data-act="hand" data-k="no">把手揣回兜里</button></div></div></div>'
+          : e.hand ? '<p class="hint" style="font-size:13.5px;color:var(--ink)">' + esc(RB.hand[e.hand]) + '</p>' : '')
         + '<button class="btn" data-act="endNext">翻到论文最后一页</button>';
     } else if (step === 1) {
       h += sysTop('首页 &gt; 学位论文 &gt; 致谢')
@@ -452,6 +499,7 @@
         + (n.mentor ? '<p style="margin:0 0 6px">导师图鉴：<b>' + esc(e.mentorType) + '</b></p>' : '')
         + (n.truth ? '<p style="margin:0 0 6px">导师真相：' + esc(C.mentors[e.mentorType].truths[e.truth]) + '</p>' : '')
         + (n.title ? '<p style="margin:0 0 6px">称号：<b>' + esc(e.title) + '</b></p>' : '')
+        + (n.pts ? '<p style="margin:0 0 6px">重生点：<b>+' + n.pts + '</b>（现在有 ' + META.pts + ' 点' + (pity() ? '；连着 ' + META.streak + ' 局没上岸，下一局保底好导师' : '') + '）</p>' : '')
         + ((e.cards || []).length ? '<p style="margin:10px 0 6px">这三年留下的明信片：' + e.cards.length + ' 张' + ((n.cards || []).length ? '，其中 ' + n.cards.length + ' 张是第一次收进图鉴' : '') + '</p><div class="cards">' + e.cards.map((a) => '<figure>' + Art.cards[a]() + '<figcaption>' + a + '</figcaption></figure>').join('') + '</div>' : '')
         + (n.mentor || n.title ? '<div class="got">' + (n.mentor ? '<div>' + Art.mentors[e.mentorType]() + '</div>' : '') + (n.title ? '<div>' + Art.titles[e.title]() + '</div>' : '') + '</div>' : '') + '</div></div>'
         + '<div class="card-wrap"><div class="card">' + Art.endings[e.name]() + '<div class="k">逃出绝命课题组 · 第 ' + META.runs + ' 次抽卡</div><h2>' + esc(e.name) + '</h2>'
@@ -483,6 +531,10 @@
     if (e.title && META.titles.indexOf(e.title) < 0) { META.titles.push(e.title); news.title = true; }
     META.cards = META.cards || {}; news.cards = (e.cards || []).filter((a) => !META.cards[a]); (e.cards || []).forEach((a) => { META.cards[a] = true; });
     META.last = e.lastRun;
+    // 重生点: 越惨攒得越快。连着没上岸的局数用来算保底；栽在谁手里，下次遇到就是复仇局
+    const fine = e.got || e.joy || e.cat === '天龙人' || e.cat === '旷野';
+    news.pts = (fine ? 1 : e.how === 'grad' ? 2 : 3) * (e.hard ? 2 : 1);
+    META.pts = Math.min(999, (META.pts || 0) + news.pts); META.streak = fine ? 0 : (META.streak || 0) + 1; META.grudge = fine ? null : e.mentorType;
     META.recent = [S.seenEvents.slice()].concat(META.recent || []).slice(0, 2);
     S.metaDone = true; V.news = news;
     save();
@@ -560,7 +612,7 @@
 
   // ---------- 渲染与操作 ----------
   function render() {
-    const views = { title: vTitle, admit: vAdmit, mentor: vMentor, turn: vTurn, gate: vGate, goal: vGoal, ending: vEnding, book: vBook };
+    const views = { title: vTitle, admit: vAdmit, mentor: vMentor, turn: vTurn, gate: vGate, goal: vGoal, ending: vEnding, book: vBook, reborn: vReborn };
     const was = document.getElementById('chat'), keepTop = was ? was.scrollTop : null;
     // 后台的模型结果回来会重画页面。重画前记下输入框里已经打的字和光标，画完放回去
     const typed = [];
@@ -727,11 +779,21 @@
     doCommit();
   }
   const acts = {
-    new() { S = Eng.newGame({ truths: Object.keys(META.mentors).reduce((o, k) => { o[k] = META.mentors[k].truths; return o; }, {}), recent: [].concat.apply([], META.recent || []) }); S.lastRun = META.last; save();
-      const run = S;                                                        // 导师主页和同门小传在后台现写
-      introReady = LLM && LLM.enabled() ? LLM.ask('intro', Eng.introContext(S)).then((j) => { if (run === S && j && Eng.applyIntro(S, j)) save(); }) : null;
-      if (V.name === 'title') return leave('lv-unlock', 380, () => go('admit', { enter: 'en-up' }));   // 像解锁手机一样划开
-      go('admit'); },
+    new() {
+      const fromTitle = V.name === 'title';
+      if (META.runs === 0) return launch({ tl: 'B' + (1 + Math.floor(Math.random() * 3)), kind: '新手保护：第一次读研，必是天龙人开局。' }, fromTitle);
+      if (META.runs === 1) return launch({ good: true, perks: { favor: true, shield: true, paper: true }, kind: '新手保护：第二次读研，必是好导师，还送一次免死和一篇必中的小论文。' }, fromTitle);
+      go('reborn', { sel: { perks: {}, mode: pity() ? 'good' : null }, enter: 'en-up' });
+    },
+    rbPerk(d) { const sel = V.sel, k = d.k; if (!RB.perks[k] || sel.mode === 'hard') return; if (sel.perks[k]) sel.perks[k] = false; else { sel.perks[k] = true; if (rbCost(sel) > (META.pts || 0)) sel.perks[k] = false; } render(); },
+    rbMode(d) { const sel = V.sel, k = d.k, old = sel.mode; if (['good', 'tl', 'hard'].indexOf(k) < 0) return; sel.mode = old === k ? null : k; if (sel.mode === 'hard') sel.perks = {}; if (rbCost(sel) > (META.pts || 0)) sel.mode = old; render(); },
+    rbGo() {
+      const sel = V.sel, cost = rbCost(sel); if (cost > (META.pts || 0)) return;
+      META.pts = (META.pts || 0) - cost;
+      const tl = sel.mode === 'tl' ? 'B' + (1 + Math.floor(Math.random() * 5)) : null, free = sel.mode === 'good' && pity();
+      launch({ tl, good: sel.mode === 'good', hard: sel.mode === 'hard', perks: sel.mode === 'hard' ? {} : sel.perks, kind: free ? '保底：连着几局没上岸，这一局必是好导师。' : sel.mode === 'good' ? '这一局必是好导师。' : '' }, false);
+    },
+    hand(d) { if (S && S.ended && RB.hand[d.k]) { S.ended.hand = d.k; save(); render(); } },
     resume, home() { V.sheet = null; save(); go('title', { enter: 'en-up' }); },   // 进度每一步都存了，随时可以退出去
     book() { go('book', { tab: 0 }); }, tab(d) { V.tab = +d.i; render(); },
     toMentor() {
