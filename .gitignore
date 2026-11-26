@@ -6,3 +6,5 @@ node_modules/
 .DS_Store
 __pycache__/
 *.pyc
+# 截图用的页面是生成物: node game/test/make_shot.js
+game/test/shot.html

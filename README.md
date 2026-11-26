@@ -43,6 +43,18 @@ npm start              # 打开 http://localhost:8787
 | `逃出绝命课题组-设计文档.md` | 完整设计文档 |
 | `balance_sim.py` | 早期的数值模拟脚本，已经落后于游戏里的规则 |
 
+## 往里加东西
+
+| 要加的 | 改哪里 |
+|---|---|
+| 一个事件 | `content.js` 里用 `E / M / G` 这些辅助函数写一条 |
+| 一个结局 | `engine.js` 的 `finish()`、`content.js` 的 `endings` 和 `endingOrder`、`art.js` 的 `endings` |
+| 一种导师 | `content.js` 的 `mentors`、`scold`、`sick`、`paper.mentorOk`、`mentorReveal`，`engine.js` 的 `POOL`、`GOAL_MATCH`、`EV_MIX`，`art.js` 的 `mentors`，`server.mjs` 提示词里讲各导师腔调的那一条 |
+| 一个模型接入点 | `server.mjs` 的 `SLOTS` 表加一项，`engine.js` 写它的上下文和校验函数，`ui.js` 里调用 |
+| 状态里的新字段 | `engine.js` 的 `SAVE_V` 加一，在 `migrate()` 里写老存档怎么补 |
+
+漏了配图或配套文本，`node test/bot.js` 会直接报出缺哪一样。
+
 ## 测试
 
 ```bash
@@ -50,4 +62,6 @@ cd game
 node test/bot.js 2000        # 随机跑 2000 局，检查规则和文本
 node test/ui_smoke.js 200    # 不开浏览器把界面从头点到结局
 node test/server_test.mjs    # 拿畸形请求打服务端，确认不崩、不被绕过
+node test/validate_test.js   # 拿畸形的模型返回喂引擎，确认数值不越界、存档读得回来
+npm test                     # 上面四个一起跑
 ```

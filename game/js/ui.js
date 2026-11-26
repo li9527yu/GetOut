@@ -12,7 +12,12 @@
   function load() {
     try {
       const d = JSON.parse(localStorage.getItem(KEY) || 'null');
-      if (d) { META = Object.assign(META, d.META || {}); S = d.S || null; }
+      if (!d) return;
+      const m = d.META && typeof d.META === 'object' ? d.META : {}, obj = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : {});
+      META = { endings: obj(m.endings), mentors: obj(m.mentors), titles: Array.isArray(m.titles) ? m.titles : [], cards: obj(m.cards), last: m.last || null, recent: Array.isArray(m.recent) ? m.recent : [], runs: +m.runs || 0 };
+      // 这一局的进度交给引擎认: 老版本的补齐字段，认不出来的另存一份（万一还想找回来），然后当作没有进行中的局
+      S = d.S ? Eng.migrate(d.S) : null;
+      if (d.S && !S) { try { localStorage.setItem(KEY + '-bad', JSON.stringify(d.S)); } catch (e) { /* 存不下就算了 */ } }
     } catch (e) { /* 读不到存档就从头开始 */ }
   }
   function save() { try { localStorage.setItem(KEY, JSON.stringify({ S, META })); } catch (e) { /* 存不了不影响玩 */ } }
@@ -45,7 +50,7 @@
     const t = S.t;
     if (S.delayed) return '研四 · 延期第 ' + Math.max(1, t - 23) + ' 周';
     const y = ['研一', '研二', '研三'][Math.floor(t / 8)] || '研三', half = t % 8 < 4 ? '上' : '下';
-    return y + ' · ' + half + ' 第 ' + ((t % 4) + 1) + ' 周（' + (t + 1) + '/24）';
+    return y + ' · ' + half + ' 第 ' + ((t % 4) + 1) + ' 周（' + (t + 1) + '/' + Eng.P.turns + '）';
   }
   function sysTop(crumb) {
     return '<div class="sys-top">研究生教育管理信息系统<small>Graduate Management Information System · 建议使用 IE 8 浏览</small></div>'
@@ -66,7 +71,7 @@
       + '<div class="notes">' + nt('n1', '导师', '在吗', '现在', 1) + nt('n2', '导师', '明早组会你第一个讲。PPT 我还没看。', '现在', 1) + nt('n3', note3[0], note3[1], note3[2], note3[0] !== '研究生院' && note3[0] !== '期刊编辑部') + '</div>'
       + '<div class="hook"><em>' + hook[0] + '</em><span>' + hook[1] + '</span></div>'
       + '<h1>逃出<br>绝命课题组</h1>'
-      + '<ul class="facts"><li><b>24</b>周</li><li><b>7</b>种导师</li><li><b>' + C.endingOrder.length + '</b>种结局</li><li><b>1/4</b>的人上岸</li></ul>'
+      + '<ul class="facts"><li><b>' + Eng.P.turns + '</b>周</li><li><b>' + Object.keys(C.mentors).length + '</b>种导师</li><li><b>' + C.endingOrder.length + '</b>种结局</li><li><b>1/4</b>的人上岸</li></ul>'
       + '<div class="pool">' + Object.keys(C.mentors).map((t) => '<span class="' + (META.mentors[t] ? '' : 'un') + '">' + fMentor(t) + '</span>').join('') + '</div>'
       + (can ? '<button class="btn" data-act="resume">接着读（' + esc(termLabelSafe()) + '）</button>' : '')
       + (S && S.ended ? '<button class="btn ghost" data-act="resume">回到上一局的结局：' + esc(S.ended.name) + '</button>' : '')
@@ -299,14 +304,6 @@
       h = '<h3>怎么跟' + esc(p.name) + '开口？</h3><p class="q">你们的关系 ' + Math.round(p.rel) + (p.dumped ? '。你已经甩给过他 ' + p.dumped + ' 次' : '。这是你第一次找他') + (p.owed ? '。你还欠他 ' + p.owed + ' 次' : '') + '</p>'
         + Object.keys(K).map((k) => '<button class="opt" data-act="dumpAsk" data-m="' + k + '"><b>' + K[k].label + '</b>　' + esc(K[k].me) + '<small>' + K[k].hint + '</small></button>').join('')
         + (LLM && LLM.enabled() ? '<form class="free" data-form="dumpAsk"><input name="t" maxlength="40" autocomplete="off" placeholder="或者自己写怎么开口……"><button>发送</button></form>' : '');
-    } else if (V.sheet === 'rest') {
-      h = '<h3>这周去哪儿？</h3><p class="q">回的 SAN 一样多。同一个方向去多了，会认识那边的人。</p>';
-      Object.keys(C.wildDirs).forEach((dir) => {
-        const n = S.wild[dir], on = S.wildDoor === dir;
-        h += '<div class="restdir"><b>' + dir + '</b><span>去过 ' + n + ' 次' + (on ? (n >= Eng.P.wildEnd ? ' · 那条路走得通了' : ' · 接了入口，到 ' + Eng.P.wildEnd + ' 次走得通') : n >= Eng.P.wildCircle ? ' · 认识了那边的人' : '') + (dir === '户外' ? ' · 去得多不容易生病' : '') + '</span></div><div class="who-row">'
-          + Object.keys(C.restActs).filter((a) => C.restActs[a].dir === dir).map((a) => '<button data-act="restAct" data-a="' + a + '" class="' + (a === A.restAct ? 'on' : '') + '">' + a + '</button>').join('') + '</div>';
-      });
-      h += '<button class="btn ghost" style="width:100%;margin:14px 0 0" data-act="closeSheet">就去' + esc(A.restAct) + '</button>';
     } else if (V.sheet === 'short') {
       const gap = S.cur.demand - A.lab;
       h = '<h3>活没干完，怎么交代？</h3><p class="q">这周派了 ' + S.cur.demand + ' 点，你只打算干 ' + A.lab + ' 点。</p>'
@@ -511,8 +508,8 @@
   }
   function vBook() {
     const tab = V.tab || 0, ne = Object.keys(META.endings).length, nm = Object.keys(META.mentors).length, nt = META.titles.length, acts4 = Object.keys(C.restActs), nc = acts4.filter((a) => (META.cards || {})[a]).length;
-    let h = '<div class="scroll"><div class="board"><div class="board-head"><div class="board-top"><button class="back" data-act="home" aria-label="返回首页">‹</button><b>档案室</b><span>已归档 ' + (ne + nm + nt + nc) + ' / ' + (C.endingOrder.length + 14 + acts4.length) + '</span></div>'
-      + '<div class="book">' + ['结局 ' + ne + '/' + C.endingOrder.length, '导师 ' + nm + '/7', '称号 ' + nt + '/7', '明信片 ' + nc + '/' + acts4.length].map((t, i) => '<button data-act="tab" data-i="' + i + '" class="' + (i === tab ? 'on' : '') + '">' + t + '</button>').join('') + '</div></div>';
+    let h = '<div class="scroll"><div class="board"><div class="board-head"><div class="board-top"><button class="back" data-act="home" aria-label="返回首页">‹</button><b>档案室</b><span>已归档 ' + (ne + nm + nt + nc) + ' / ' + (C.endingOrder.length + Object.keys(C.mentors).length + Object.keys(C.titles).length + acts4.length) + '</span></div>'
+      + '<div class="book">' + ['结局 ' + ne + '/' + C.endingOrder.length, '导师 ' + nm + '/' + Object.keys(C.mentors).length, '称号 ' + nt + '/' + Object.keys(C.titles).length, '明信片 ' + nc + '/' + acts4.length].map((t, i) => '<button data-act="tab" data-i="' + i + '" class="' + (i === tab ? 'on' : '') + '">' + t + '</button>').join('') + '</div></div>';
     if (tab === 0) {
       C.endingOrder.forEach((n) => {
         const got = META.endings[n], E = C.endings[n];
@@ -657,7 +654,7 @@
     const el = Date.now() - weekCard.at;
     if (el > 600) { weekCard = null; return ''; }
     const t = S.t, y = S.delayed ? '研四' : (['研一', '研二', '研三'][Math.floor(t / 8)] || '研三') + (t % 8 < 4 ? '上' : '下');
-    return '<div class="weekcard" style="animation-delay:-' + el + 'ms"><div style="animation-delay:-' + el + 'ms"><small>' + y + '</small><b>' + (S.delayed ? Math.max(1, t - 23) : (t % 4) + 1) + '</b><span>第 ' + (S.delayed ? Math.max(1, t - 23) : t + 1) + ' 周' + (S.delayed ? '（延期）' : ' / 24') + '</span></div></div>';
+    return '<div class="weekcard" style="animation-delay:-' + el + 'ms"><div style="animation-delay:-' + el + 'ms"><small>' + y + '</small><b>' + (S.delayed ? Math.max(1, t - 23) : (t % 4) + 1) + '</b><span>第 ' + (S.delayed ? Math.max(1, t - 23) : t + 1) + ' 周' + (S.delayed ? '（延期）' : ' / ' + Eng.P.turns) + '</span></div></div>';
   }
   const turnLat = [];
   function turnWait() {
@@ -769,7 +766,7 @@
     },
     quoteMore() { V.quoted = V.quoted || 1; const n = V.quoted; V.quoted = 0; V.quotedN = n; render(); },
     dmClose() { if (S.cur && S.cur.dm) { S.cur.dm.closed = true; A = null; save(); } render(); },
-    restPick() { V.sheet = 'rest'; render(); }, restAct(d) { A.restAct = d.a; V.sheet = null; restAsk(); render(); },
+
     aiThesis(d) { A.aiThesis = d.m === 'yes'; V.sheet = null; confirm(); },
     confirm,
     short(d) { if (d.m === 'ai') A.aiLab = true; else { A.short = d.m; A.dumpTo = d.slot || null; } V.sheet = null; confirm(); },
@@ -845,7 +842,7 @@
     if (!el || el.disabled || V.busy || leaving) return;
     // 私聊窗口开着的时候，底下群聊里的按钮都不该能点
     if (V.name === 'turn' && S && S.cur && S.cur.dm && !S.cur.dm.closed && ['dm', 'dmClose', 'home'].indexOf(el.dataset.act) < 0) return;
-    if (el.dataset.act === 'maskClose') { if (ev.target === el && (V.sheet === 'file' || V.sheet === 'rest' || V.sheet === 'hole')) acts.closeSheet(); return; }
+    if (el.dataset.act === 'maskClose') { if (ev.target === el && (V.sheet === 'file' || V.sheet === 'hole')) acts.closeSheet(); return; }
     const f = acts[el.dataset.act];
     if (f) f(el.dataset);
   });

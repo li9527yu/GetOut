@@ -1,5 +1,9 @@
 {
   "name": "escape-lab",
   "private": true,
-  "scripts": { "start": "node server.mjs", "test": "node test/bot.js 2000 && node test/ui_smoke.js 100" }
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node test/bot.js 500 && node test/ui_smoke.js 100 && node test/validate_test.js 100 && node test/server_test.mjs",
+    "shot": "node test/make_shot.js"
+  }
 }

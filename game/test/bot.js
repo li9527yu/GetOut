@@ -81,6 +81,17 @@ console.log('\n各导师上岸率（机器人水平，仅供参考）:'); Object
 console.log('\n称号:', JSON.stringify(titles));
 const never = C.events.filter((e) => !evSeen[e.id] && e.id !== 'node_first_omen').map((e) => e.id);
 console.log('\n事件总数', C.events.length, ' 从未出现:', never.join(', ') || '无');
+// 配套检查: 加了一个结局、导师、称号、活动，却忘了配图或配套文本，界面会直接空白。这里一次查全
+const Art = require('../js/art.js');
+const need = (ok, what) => { if (!ok) problems.push('缺 ' + what); };
+C.endingOrder.forEach((n) => { need(C.endings[n] && C.endings[n].text && C.endings[n].hint, '结局文本 ' + n); need(typeof Art.endings[n] === 'function', '结局图 ' + n); });
+Object.keys(C.endings).forEach((n) => need(C.endingOrder.indexOf(n) >= 0, '结局没排进顺序表 ' + n));
+Object.keys(C.mentors).forEach((t) => { need(typeof Art.mentors[t] === 'function', '导师图 ' + t); need(C.scold[t], '导师训人的话 ' + t); need(C.sick.leaveOk[t] && C.sick.leaveNo[t], '导师批假的话 ' + t); need(C.paper.mentorOk[t], '导师对小论文的话 ' + t); need(C.mentorReveal[t], '导师档案批注 ' + t); need(Eng.GOAL_MATCH[t] && Eng.POOL[t] != null, '导师的抽取权重或去向匹配 ' + t); need((C.mentors[t].truths || []).length === 3, '导师的三条真相 ' + t); });
+Object.keys(C.titles).forEach((t) => need(typeof Art.titles[t] === 'function', '称号章 ' + t));
+Object.keys(C.restActs).forEach((a) => { need(typeof Art.cards[a] === 'function', '明信片 ' + a); need(C.cardNote[a], '明信片背面的字 ' + a); need((C.restWhy[a] || []).length, '去这儿的由头 ' + a); need(C.wildDirs[C.restActs[a].dir], '活动的方向 ' + a); });
+['小导', '师兄', '师姐', '同级', '师弟'].forEach((k) => need(typeof Art.peers[k] === 'function', '同门头像 ' + k));
+Object.keys(C.personas).forEach((slot) => C.personas[slot].forEach((p) => need(C.chatter[p.name], '人设的闲聊 ' + p.name)));
+C.colleges.forEach((c) => need(c.gear && c.stuff && c.coat && c.topics.length >= 2, '学院的仪器、耗材、工作服或方向 ' + c.name));
 const uniq = [...new Set(problems)];
 console.log('\n问题 ' + uniq.length + ' 个'); uniq.slice(0, 30).forEach((x) => console.log('  ' + x));
 process.exit(uniq.length ? 1 : 0);

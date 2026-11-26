@@ -1,5 +1,5 @@
 /* 逃出绝命课题组 · 规则引擎
- * 数值与结算顺序和 balance_sim.py 保持一致（设计文档第 14 节）。
+ * 数值以这个文件里的 P、R、EV 为准。上一级目录的 balance_sim.py 是早期的模拟脚本，后来加的系统它都没有，不要拿它对数。
  * 不碰 DOM，浏览器和 node 都能跑。状态 s 是纯 JSON，可以直接存档。
  */
 (function (root, factory) {
@@ -171,13 +171,31 @@
     s.known = { push: 0, res: 0, fangren: 0, renpin: 0, level: 0, match: 0 };
   }
 
+  // ---------- 存档版本 ----------
+  // 存档就是状态 s。每次给 s 加了新字段、或者改了字段的意思，把 SAVE_V 加一，并在 migrate 里写清楚老存档怎么补。
+  // 读档只走 migrate 这一个入口: 认不出来的存档返回 null，由界面决定怎么办。
+  const SAVE_V = 2;
+  function migrate(s) {
+    if (!s || typeof s !== 'object' || typeof s.t !== 'number' || !s.mentor || !Array.isArray(s.peers) || !s.stats || !s.flags || !Array.isArray(s.traits)) return null;
+    if (!C.mentors[s.mentor.type] || s.peers.some((p) => !p || SLOTS.indexOf(p.slot) < 0)) return null;
+    // 1 → 2: 课题组之外、生病、里程碑和小论文、学院、明信片、树洞、私聊，都是后来加的
+    wildInit(s); mileInit(s);
+    if (!C.colleges.some((x) => x.name === s.college)) s.college = C.colleges[0].name;
+    s.cards = s.cards || {}; s.hole = s.hole || []; s.queue = s.queue || []; s.mem = s.mem || []; s.known = s.known || {}; s.seenEvents = s.seenEvents || []; s.gen = s.gen || []; s.genEvents = s.genEvents || {};
+    s.dmCd = s.dmCd || 0;
+    s.peers.forEach((p) => { p.owed = p.owed || 0; p.mem = p.mem || []; });
+    if (s.cur && s.cur.dm && !peerBySlot(s, s.cur.dm.slot)) s.cur.dm = null;
+    if (s.cur && !s.cur.rest && !s.cur.result && s.t >= 1) s.cur.rest = null;
+    s.v = SAVE_V;
+    return s;
+  }
   function newGame(meta) {
     meta = meta || {};
     const total = rnd() < 0.10 ? 16 : 12;
     let a; do { a = [ri(1, 5), ri(1, 5), ri(1, 5), ri(1, 5)]; } while (a[0] + a[1] + a[2] + a[3] !== total);
     const groups = Object.keys(TRAITS).sort(() => rnd() - 0.5).slice(0, 3);
     const traits = groups.map((g) => pick(TRAITS[g]));
-    const s = { v: 1, traits, baseAttrs: { nao: a[0], gan: a[1], xintai: a[2], renqing: a[3] } };
+    const s = { v: SAVE_V, traits, baseAttrs: { nao: a[0], gan: a[1], xintai: a[2], renqing: a[3] } };
     s.nao = a[0]; s.gan = a[1];
     s.xintai = Math.min(5, a[2] + has(s, '双非逆袭') + has(s, '助学贷款'));
     s.renqing = Math.min(5, a[3] + has(s, '工作后读研') + has(s, '社牛'));
@@ -302,7 +320,7 @@
   function dmPick(s, key, judged) {
     const c = s.cur, d = c.dm, D = C.dm;
     if (!d || d.done) return null;
-    const p = peerBySlot(s, d.slot), j = judged || {}, typed = str(j.text, 60);
+    const p = peerBySlot(s, d.slot), j = judged && typeof judged === 'object' && !Array.isArray(judged) ? judged : {}, typed = str(j.text, 60);
     const opt = d.opts.find((o) => o.k === key), tag = (t) => d.tags.push(t);
     const reply = (fallback) => { const r = Array.isArray(j.reply) ? j.reply : j.reply ? [j.reply] : []; const out = r.map((x) => str(x, 44)).filter(Boolean).slice(0, 2); (out.length ? out : [pick(fallback)]).forEach((t) => d.log.push({ who: '他', text: gearText(s, t) })); };
     const end = () => {
@@ -322,7 +340,7 @@
       if (key === 'busy') { p.rel = clampN(p.rel - 3, 0, 100); reply(D.moves.busy.him); tag(p.name + ' 关系 −3'); prem(s, p, '他私下来找萝卜说话，萝卜说没空'); return end(); }
       if (key === 'brush') { p.rel = clampN(p.rel - 5, 0, 100); reply(D.moves.brush.him); tag(p.name + ' 关系 −5'); prem(s, p, '他私下来找萝卜说话，萝卜敷衍了几句'); return end(); }
       if (c.ap > 0) { c.ap -= 1; tag('精力 −1'); } else { c.sanLoss += 2; tag('SAN −2'); }
-      const m = D.moves[key] ? key : 'listen';
+      const m = own(D.moves, key) ? key : 'listen';        // 只认表里有的走向；constructor 这种名字不算
       d.move = m;
       reply(D.moves[m].him);
       if (d.kind === 'trap') {
@@ -372,11 +390,11 @@
   function holePost(s, text, judged) {
     const c = s.cur, t = str(text, 100);
     if (!canHole(s) || !t || t.length < 2) return null;
-    const j = judged || {}, same = (s.hole || []).some((x) => x.text === t);
-    let gain = judged ? clampN(Math.round(+j.san || 0), 0, 6) : t.length >= 12 ? 3 : 2;
+    const j = judged && typeof judged === 'object' && !Array.isArray(judged) ? judged : {}, same = (s.hole || []).some((x) => x.text === t);
+    let gain = judged ? clampN(Math.round(num(j.san)), 0, 6) : t.length >= 12 ? 3 : 2;
     if (same) gain = Math.min(gain, 1);
     const replies = (Array.isArray(j.replies) ? j.replies : []).map((x) => str(x, 30)).filter(Boolean).slice(0, 2);
-    const post = { t: s.t, text: t, san: gain, likes: clampN(Math.round(+j.likes || (3 + Math.floor(rnd() * 40))), 0, 999), replies: replies.length ? replies : [pick(C.hole.replies)], note: str(j.note, 40) || '' };
+    const post = { t: s.t, text: t, san: gain, likes: clampN(Math.round(num(j.likes) || (3 + Math.floor(rnd() * 40))), 0, 999), replies: replies.length ? replies : [pick(C.hole.replies)], note: str(j.note, 40) || '' };
     s.hole = (s.hole || []).concat(post).slice(-20); c.holeDone = true; s.holeUntil = null; s.holeWhy = null;
     s.san = Math.min(s.sanMax, s.san + gain); see(s, 1);
     // 指名道姓的帖子有两成概率被认出来
@@ -520,7 +538,7 @@
   const field = (s) => ({ 学院: collegeOf(s).name, 学科: collegeOf(s).kind, 课题方向: s.topic, 实验室里的标志性仪器: collegeOf(s).gear, 常用的耗材: collegeOf(s).stuff });
   function fill(s, text, vars) {
     return gearText(s, text).replace(/\{([^}]+)\}/g, (m, k) => {
-      if (vars && vars[k] != null) return vars[k];
+      if (vars && Object.prototype.hasOwnProperty.call(vars, k) && vars[k] != null) return vars[k];   // 只认自己放进去的变量，{constructor} 这种不算
       if (k === '导师') return s.mentor.call;
       if (k === '导师名') return s.mentor.surname + s.mentor.given;
       if (k === '课题方向') return s.topic;
@@ -910,7 +928,7 @@
     return !!o && o.tone === '刚' && !o.special && (e.gen || (!o.effects && !o.check));
   }
   function boldChance(s, ruling, out) {
-    const edge = clampN(Math.round(+(ruling && ruling.edge) || 0), -20, 20);
+    const edge = clampN(Math.round(num(ruling && ruling.edge)), -20, 20);
     if (out && edge >= 10) out.tags.push('这话说在了点子上');
     if (out && edge <= -10) out.tags.push('这话说得不是时候');
     return EV.boldBase + EV.boldPer * (s.renqing + s.mentor.fangren) + edge / 100;
@@ -974,7 +992,8 @@
   function pickFree(s, text, judged) {
     const c = s.cur, inst = c.event, e = getEv(s, inst.id);
     const out = { lines: [], tags: [], ended: false };
-    judged = judged || {};
+    judged = judged && typeof judged === 'object' && !Array.isArray(judged) ? judged : {};   // 模型返回的要是个对象，别的都当没有
+    const mine = str(text, 60) || '……';                     // 玩家自己打的字也要截断、打码
     let tone = ['怂', '刚', '歪'].indexOf(judged.tone) >= 0 ? judged.tone : '歪';
     if (tone === '刚' && (s.assim >= P.assimGray || s.seen >= 75)) tone = s.assim >= P.assimGray ? '怂' : '歪';   // 变灰的口气说不出口
     c.picked = true;
@@ -984,9 +1003,9 @@
     else if (tone === '刚') { ok = rnd() < boldChance(s, judged, out); applyFx(s, c, ok ? EV.boldOk : EV.boldFail, out); }
     else { applyFx(s, c, EV.odd, out); if (rnd() < EV.oddBackfire) applyFx(s, c, { favor: EV.oddFavor }, out); }
     // 这句话本身带来的后果: 模型按内容给，这里逐项截断。顶回去没顶动时，好处不算数；推掉活只有顶成了才算
-    const tw = judged.effects || judged.twist || {}, lim = (k, n) => clampN(Math.round(+(tw[k]) || 0), -n, n);
-    const fxs = { favor: clampN(Math.round(+(tw.favor != null ? tw.favor : tw.favour) || 0), -3, 3), san: lim('san', 3), thesis: lim('thesis', 2), contrib: lim('contrib', 2), demand: lim('demand', 1) };
-    if (tw.rel && typeof tw.rel === 'object') { fxs.rel = {}; Object.keys(tw.rel).slice(0, 2).forEach((k) => { const p = peerBySlot(s, k); if (p && p.state === '正常') fxs.rel[k] = clampN(Math.round(+tw.rel[k] || 0), -8, 8); }); }
+    const tw = judged.effects || judged.twist || {}, lim = (k, n) => clampN(Math.round(num(tw[k])), -n, n);
+    const fxs = { favor: clampN(Math.round(num(tw.favor != null ? tw.favor : tw.favour)), -3, 3), san: lim('san', 3), thesis: lim('thesis', 2), contrib: lim('contrib', 2), demand: lim('demand', 1) };
+    if (tw.rel && typeof tw.rel === 'object') { fxs.rel = {}; Object.keys(tw.rel).slice(0, 2).forEach((k) => { const p = peerBySlot(s, k); if (p && p.state === '正常') fxs.rel[k] = clampN(Math.round(num(tw.rel[k])), -8, 8); }); }
     if (tone === '刚' && !ok) { ['favor', 'san', 'thesis', 'contrib'].forEach((k) => { fxs[k] = Math.min(0, fxs[k]); }); Object.keys(fxs.rel || {}).forEach((k) => { fxs.rel[k] = Math.min(0, fxs.rel[k]); }); }
     if (fxs.demand < 0 && !(tone === '刚' && ok)) fxs.demand = 0;
     if (fxs.demand < 0 && !c.demand) fxs.demand = 0;
@@ -998,20 +1017,20 @@
     out.tags = merged.map((x) => (typeof x === 'string' ? x : sums[x.k] ? x.k + ' ' + sign(sums[x.k]) : null)).filter(Boolean);
     // 余波: 下一周有人会再提起这句话
     const ec = judged.echo, ecWho = ec && (ec.who === '导师' || ec.who === '旁白' ? ec.who : (peerBySlot(s, ec.who) || {}).state === '正常' ? ec.who : null);
-    if (ecWho && typeof ec.text === 'string' && ec.text.trim().length >= 4) s.echo = { who: ecWho, text: ec.text.trim().slice(0, 60), said: String(text).slice(0, 20) };
-    const reply = mask(String((ok ? judged.reply : judged.reply_fail || judged.reply) || '').replace(/^\s*旁白\s*[：:]\s*/, '').slice(0, 80));
+    if (ecWho && typeof ec.text === 'string' && ec.text.trim().length >= 4) s.echo = { who: ecWho, text: str(ec.text, 60), said: mine.slice(0, 20) };
+    const reply = (str(ok ? judged.reply : str(judged.reply_fail, 90) ? judged.reply_fail : judged.reply, 90) || '').replace(/^\s*旁白\s*[：:]\s*/, '').slice(0, 80);
     // 让玩家看得见这句话被听成了什么
     out.tags.unshift(tone === '怂' ? '听起来是在服软' : tone === '歪' ? '你把话岔开了' : ok ? '你顶了回去，对方让了一步' : '你顶了回去，没顶动');
     if (reply) out.lines.push({ who: e.speaker === '旁白' ? '旁白' : inst.speaker, text: reply });
     // 旁观的同门私下说一句
     const as = judged.aside, asP = as && typeof as.text === 'string' && peerBySlot(s, as.who);
     if (asP && asP.state === '正常' && asP.slot !== inst.slot && e.speaker === '导师' && tone !== '怂' && as.text.trim().length >= 2 && as.text.indexOf(asP.name) < 0) {
-      out.lines.push({ who: asP.slot, text: as.text.trim().slice(0, 30), tag: '私聊' });
-      prem(s, asP, '萝卜当着大家的面对导师说：「' + String(text).slice(0, 30) + '」');
+      out.lines.push({ who: asP.slot, text: str(as.text, 30), tag: '私聊' });
+      prem(s, asP, '萝卜当着大家的面对导师说：「' + mine.slice(0, 30) + '」');
     }
     if (e.reveal) reveal(s, e.reveal, out.lines);
     if (e.truth) revealTruth(s, out.lines);
-    c.eventDone = { text: String(text).slice(0, 60), tags: out.tags, lines: out.lines, free: true, say: e.speaker !== '旁白', tone };
+    c.eventDone = { text: mine, tags: out.tags, lines: out.lines, free: true, say: e.speaker !== '旁白', tone };
     noteEvent(s, inst, e, c.eventDone.text, tone, ok);
     c.event = null;
     return out;
@@ -1050,6 +1069,9 @@
   // 模型写出来的脏话一律打成 **，意思能看懂就行
   const mask = (t) => String(t).replace(/[个狗放]屁|屁话|屁用|傻[逼比叉屄]|傻[BbXx]|煞笔|沙雕|[他她你]妈的?|妈的|尼玛|操你|草泥马|卧槽|我[操艹靠]|艹|狗屁|放屁|狗日的?|滚蛋|贱人|贱货|婊子?|屌|鸡巴|[sS][bB](?![a-zA-Z])|[tT][mM][dD]/g, '**');
   const str = (x, n) => (typeof x === 'string' && x.trim() ? mask(x.trim().slice(0, n)) : null);
+  /** 模型给的「数」可能是任何东西。只认真的数字和写成字符串的数字，别的一律当 0。不能直接用 +x: 有的对象一转数字就抛错。 */
+  const num = (x) => (typeof x === 'number' ? (isFinite(x) ? x : 0) : typeof x === 'string' && x.trim() !== '' && isFinite(+x) ? +x : 0);
+  const own = (o, k) => !!o && typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
   /** 导师训人的话: 按他的类型挑一句，没有就用通用的。 */
   const scoldLine = (s, fallback) => { const own = C.scold[s.mentor.type]; return own && rnd() < 0.7 ? pick(own) : pick(fallback); };
   /** 群聊: 导师派活的话、一句闲聊、学期末的朋友圈。 */
@@ -1124,7 +1146,7 @@
   }
   function addGenerated(s, j) {
     if (!j || s.ended || (s.gen && s.gen.length >= 1)) return false;
-    const text = typeof j.text === 'string' && j.text.trim().length <= 80 ? j.text.trim() : null, kind = KINDS.indexOf(j.kind) >= 0 ? j.kind : '无';   // 超长的整个不要，不截断
+    const text = typeof j.text === 'string' && j.text.trim().length <= 80 ? mask(j.text.trim()) : null, kind = KINDS.indexOf(j.kind) >= 0 ? j.kind : '无';   // 超长的整个不要，不截断
     const speaker = j.speaker === '导师' || j.speaker === '旁白' || peerBySlot(s, j.speaker) ? j.speaker : '旁白';
     if (!text || !Array.isArray(j.options)) return false;
     const options = [];
@@ -1132,7 +1154,7 @@
       const o = j.options.find((x) => x && x.tone === tone), t = o && str(o.text, 40);
       if (!t || t.length > 20) return;
       const extra = {};
-      Object.keys(EXTRA_CAP).forEach((k) => { const v = Math.round(+((o.extra || {})[k]) || 0); if (v) extra[k] = clampN(v, -EXTRA_CAP[k], EXTRA_CAP[k]); });
+      Object.keys(EXTRA_CAP).forEach((k) => { const v = Math.round(num((o.extra || {})[k])); if (v) extra[k] = clampN(v, -EXTRA_CAP[k], EXTRA_CAP[k]); });
       options.push({ tone, text: t, extra });
     });
     if (options.length !== 3) return false;
@@ -1363,7 +1385,7 @@
           if (plan.dumpManner === 'beg') dumpTo.begged = (dumpTo.begged || 0) + 1;
           if (mn.san) { if (mn.san > 0) s.san = Math.min(s.sanMax, s.san + mn.san); else c.sanLoss -= mn.san; }
           if (mn.rel) { dumpTo.rel = clampN(dumpTo.rel + mn.rel, 0, 100); }
-          if (plan.dumpSaid) L.push({ who: '我', text: String(plan.dumpSaid).slice(0, 60), free: true, say: true, tag: '你对' + dumpTo.name + '说' });
+          if (str(plan.dumpSaid, 60)) L.push({ who: '我', text: str(plan.dumpSaid, 60), free: true, say: true, tag: '你对' + dumpTo.name + '说' });
           const r0 = clampN(dumpRefuseChance(dumpTo) + mn.adj, 0, 0.95), rul = plan.dumpRuling;
           dumpByModel = !!rul && dumpTo.state !== '附体' && r0 > 0.03 && r0 < 0.85 && ['接', '拒', '告状'].indexOf(rul.decision) >= 0;
           if (dumpByModel && rul.decision === '拒' && r0 <= 0.25 && !(dumpTo.dumped > 0) && rnd() < 0.5) dumpByModel = false;   // 没过节、第一次开口: 模型说拒也只有一半算数
@@ -1827,7 +1849,7 @@
     return s.ended;
   }
 
-  return { P, R, EV, ARCH, GOAL_MATCH, POOL, TRAITS, EVENTS,
+  return { SAVE_V, migrate, P, R, EV, ARCH, GOAL_MATCH, POOL, TRAITS, EVENTS,
     newGame, beginTurn, pickOption, pickFree, canFreeReply, freeContext, endingContext, flavorContext, applyFlavor, applyPeerLines, worldContext, eventContext, needsRuling, boldContext, dumpContext, introContext, applyIntro, addGenerated, dumpRefuseChance, commit, gate, chooseGoal, blindReview, finish,
     stageOf, cells, mood, nickname, blocked, thesisCap, exploreCost, aiRate, canSlack, landed, chipsCap,
     normalPeers, peerBySlot, fill, cond, canHole, holeContext, holePost, dmPick, dmContext, wildCount, outlook, collegeOf, gearText, restContext, wildReady, leaveChance, sickChance, healRate, slackRate, thesisRate, chipsRate, has };
