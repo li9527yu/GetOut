@@ -1,0 +1,33 @@
+# systemd 服务单元。放到 /etc/systemd/system/getout.service
+# 假设代码在 /opt/getout，用专门的 getout 用户跑。路径不同就改下面三处 /opt/getout。
+[Unit]
+Description=GetOut 逃出绝命课题组
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=getout
+Group=getout
+WorkingDirectory=/opt/getout/game
+ExecStart=/usr/bin/node server.mjs
+# 只听本机，外面的流量都从 Caddy 进来；TRUST_PROXY 让限流按玩家的真实地址算
+Environment=HOST=127.0.0.1
+Environment=PORT=8787
+Environment=TRUST_PROXY=1
+Environment=NODE_ENV=production
+# 模型地址和密钥在 /opt/getout/game/.env 里，服务自己会读，不写在这里
+Restart=always
+RestartSec=3
+# 停服务时先发 SIGTERM，服务会把手上的请求跑完再退
+TimeoutStopSec=15
+
+# 收紧权限: 整个系统只读，只有游戏目录能写（投稿文件 quotes.jsonl 在里面）
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/getout/game
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target

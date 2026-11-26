@@ -21,6 +21,9 @@ const BASE = (process.env.LLM_BASE_URL || '').replace(/\/$/, '');
 const KEY = process.env.LLM_API_KEY || '';
 const MODEL = process.env.LLM_MODEL || 'qwen3.6-flash';              // 快而便宜: 群聊、同门回话、自由回复
 const MODEL_STRONG = process.env.LLM_MODEL_STRONG || MODEL;            // 文笔要求高、又不用玩家等的: 临场事件、结局致谢
+// 放在 Caddy / nginx 后面时设 TRUST_PROXY=1: 这时连进来的都是代理，玩家的地址要从 X-Forwarded-For 里取，限流才是按人算的
+const TRUST_PROXY = process.env.TRUST_PROXY === '1';
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';      // 从别的机器看 /stats 时用；不设就只有本机能看
 const TIMEOUT = 15000;                  // 界面最多等 9 秒，再久也没人看了
 
 const WORLD = `你在为一款中文网页文字游戏《逃出绝命课题组》写台词。玩家扮演硕士研究生「萝卜」，在三年里和导师、同门周旋。
@@ -236,7 +239,17 @@ function saveQuote(ip, body) {
   try { fs.appendFileSync(QUOTES, JSON.stringify(row) + '\n'); return true; } catch (e) { console.error('[投稿] 写不进 quotes.jsonl', e.message); return false; }
 }
 
-async function ask(slot, payload, signal) {
+// ---------- 日志和统计 ----------
+// 日志: 每件事一行 JSON 写到标准输出，交给 systemd / docker 去收。不记玩家打的字和模型写的内容，只记发生了什么、花了多久。
+const log = (ev, f) => process.stdout.write(JSON.stringify(Object.assign({ t: new Date().toISOString(), ev }, f || {})) + '\n');
+const STATS = { start: Date.now(), slots: {}, rejects: {}, errors: 0, quotes: 0, pages: 0 };
+function count(slot, ok, ms, aborted, usage) {
+  const x = (STATS.slots[slot] = STATS.slots[slot] || { n: 0, ok: 0, aborted: 0, ms: 0, slow: 0, in: 0, out: 0 });
+  x.n += 1; if (ok) x.ok += 1; if (aborted) x.aborted += 1; x.ms += ms; if (ms > 7000) x.slow += 1;
+  if (usage) { x.in += usage.prompt_tokens || 0; x.out += usage.completion_tokens || 0; }
+}
+
+async function ask(slot, payload, signal, meta) {
   if (typeof slot !== 'string' || !Object.hasOwn(SLOTS, slot)) return null;
   const def = SLOTS[slot];
   const j = await chat({
@@ -245,6 +258,7 @@ async function ask(slot, payload, signal) {
     response_format: { type: 'json_object' },
     messages: [{ role: 'system', content: def.system + corpusHint(slot) + '\n' + def.shape }, { role: 'user', content: JSON.stringify(payload) }],
   }, signal);
+  if (meta && j && j.usage) meta.usage = j.usage;
   const text = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
   if (!text) return null;
   try { return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch (e) { console.error('[llm] 返回的不是 JSON:', text.slice(0, 80)); return null; }
@@ -313,7 +327,18 @@ const send = (res, code, body, type) => { if (res.headersSent || res.destroyed) 
 
 async function handle(req, res) {
   const url = new URL(req.url, 'http://localhost');
-  const ip = req.socket.remoteAddress || '';
+  const sock = req.socket.remoteAddress || '', fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  const ip = TRUST_PROXY && fwd ? fwd : sock;
+  // 运行情况: 只给本机直接来看的人（不是经过代理转进来的），或者带对了口令的人
+  if (url.pathname === '/stats') {
+    const local = /^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(sock) && !req.headers['x-forwarded-for'];
+    if (!local && !(ADMIN_TOKEN && url.searchParams.get('token') === ADMIN_TOKEN)) return send(res, 404, 'not found', 'text/plain');
+    const slots = {}; let total = 0, okAll = 0;
+    for (const k of Object.keys(STATS.slots)) { const x = STATS.slots[k]; total += x.n; okAll += x.ok; slots[k] = { 调用: x.n, 成功: x.ok, 玩家没等: x.aborted, 超过7秒: x.slow, 平均毫秒: x.n ? Math.round(x.ms / x.n) : 0, 输入token: x.in, 输出token: x.out }; }
+    return send(res, 200, JSON.stringify({ 启动于: new Date(STATS.start).toISOString(), 运行小时: +((Date.now() - STATS.start) / 3600000).toFixed(2), 模型可用: healthy, 今天已调用: dayCount, 每日上限: LIMIT.daily,
+      正在跑的请求: runningAll, 活跃地址数: buckets.size, 模型调用总数: total, 成功率: total ? +(okAll / total).toFixed(3) : null, 各接入点: slots, 被拒绝: STATS.rejects, 出错次数: STATS.errors, 投稿数: STATS.quotes, 首页打开次数: STATS.pages,
+      内存MB: Math.round(process.memoryUsage().rss / 1048576) }, null, 1));
+  }
   if (url.pathname === '/llm/health') return send(res, 200, JSON.stringify({ ok: await health() }));
   if (url.pathname === '/llm' && req.method === 'POST') {
     if (!sameSite(req)) return send(res, 403, '{"result":null}');
@@ -324,12 +349,18 @@ async function handle(req, res) {
     if (!body || typeof body !== 'object' || typeof body.slot !== 'string' || !Object.hasOwn(SLOTS, body.slot) || body.payload === undefined) return send(res, 400, '{"result":null}');
     if (!(await health())) return send(res, 200, '{"result":null}');
     const why = allow(ip);
-    if (why) { console.error('[llm] 拒绝', ip, why); return send(res, 429, '{"result":null}'); }
+    if (why) { STATS.rejects[why] = (STATS.rejects[why] || 0) + 1; log('reject', { ip, why, slot: body.slot }); return send(res, 429, '{"result":null}'); }
     // 玩家不等了（关了页面、超时走了规则）就把发给模型的请求掐掉，不白花钱
     const ctl = new AbortController(), gone = () => { if (!res.writableEnded) ctl.abort(); };
     res.on('close', gone);
     running.set(ip, (running.get(ip) || 0) + 1); runningAll += 1;
-    try { return send(res, 200, JSON.stringify({ result: await ask(body.slot, body.payload, ctl.signal) })); }
+    const t0 = Date.now(), meta = {};
+    try {
+      const result = await ask(body.slot, body.payload, ctl.signal, meta), ms = Date.now() - t0, aborted = ctl.signal.aborted;
+      count(body.slot, !!result, ms, aborted, meta.usage);
+      log('llm', { ip, slot: body.slot, ok: !!result, ms, aborted, in: meta.usage && meta.usage.prompt_tokens, out: meta.usage && meta.usage.completion_tokens });
+      return send(res, 200, JSON.stringify({ result }));
+    }
     finally { res.off('close', gone); runningAll -= 1; const n = (running.get(ip) || 1) - 1; if (n > 0) running.set(ip, n); else running.delete(ip); }
   }
   if (url.pathname === '/quote' && req.method === 'POST') {
@@ -338,7 +369,8 @@ async function handle(req, res) {
     if (raw === null) return send(res, 413, '{"ok":false}');
     let body; try { body = JSON.parse(raw); } catch (e) { return send(res, 400, '{"ok":false}'); }
     if (!body || typeof body !== 'object') return send(res, 400, '{"ok":false}');
-    return send(res, 200, JSON.stringify({ ok: saveQuote(ip, body) }));
+    const saved = saveQuote(ip, body); if (saved) STATS.quotes += 1; log('quote', { ip, ok: saved });
+    return send(res, 200, JSON.stringify({ ok: saved }));
   }
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method not allowed', 'text/plain');
   if (url.pathname === '/favicon.ico') return send(res, 204, '', 'image/x-icon');   // 浏览器自己会来要，没有就别报错
@@ -346,14 +378,17 @@ async function handle(req, res) {
   let rel; try { rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1)); } catch (e) { return send(res, 400, 'bad request', 'text/plain'); }
   const file = path.join(ROOT, rel);
   if (!file.startsWith(ROOT + path.sep) || !/^(index\.html|js\/[\w.-]+\.js)$/.test(rel) || !fs.existsSync(file)) return send(res, 404, 'not found', 'text/plain');
+  if (rel === 'index.html') { STATS.pages += 1; log('page', { ip }); }
   send(res, 200, fs.readFileSync(file), TYPES[path.extname(file)]);
 }
 
 // 任何一个请求出了岔子，都只让这一个请求失败，不能把整个服务带倒
 const server = http.createServer((req, res) => {
-  handle(req, res).catch((err) => { console.error('[服务] 请求出错', req.method, String(req.url).slice(0, 80), err && err.message); send(res, err instanceof TypeError && /Invalid URL/.test(err.message) ? 400 : 500, '{"result":null}'); });
+  handle(req, res).catch((err) => { STATS.errors += 1; log('error', { method: req.method, url: String(req.url).slice(0, 80), msg: err && err.message }); send(res, err instanceof TypeError && /Invalid URL/.test(err.message) ? 400 : 500, '{"result":null}'); });
 });
 server.requestTimeout = 30000; server.headersTimeout = 10000;
-process.on('unhandledRejection', (err) => console.error('[服务] 没接住的错误', err && err.message));
-process.on('uncaughtException', (err) => console.error('[服务] 没接住的异常', err && err.message));
-server.listen(PORT, HOST, () => console.log(`逃出绝命课题组: http://localhost:${PORT}  （模型 ${MODEL} / ${MODEL_STRONG}；每个地址每分钟 ${LIMIT.perMin} 次，全天 ${LIMIT.daily} 次）` + (HOST === '127.0.0.1' ? '' : '\n注意: 现在局域网里的人都能访问。')));
+process.on('unhandledRejection', (err) => { STATS.errors += 1; log('error', { where: 'unhandledRejection', msg: err && err.message }); });
+process.on('uncaughtException', (err) => { STATS.errors += 1; log('error', { where: 'uncaughtException', msg: err && err.message }); });
+// systemd / docker 停服务时发 SIGTERM: 不再接新请求，等手上的跑完再退，最多等 10 秒
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { log('stop', { sig }); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 10000).unref(); });
+server.listen(PORT, HOST, () => { log('start', { port: PORT, host: HOST, model: MODEL, strong: MODEL_STRONG, perMin: LIMIT.perMin, daily: LIMIT.daily, trustProxy: TRUST_PROXY, keySet: !!KEY }); console.log(`逃出绝命课题组: http://localhost:${PORT}  （模型 ${MODEL} / ${MODEL_STRONG}；每个地址每分钟 ${LIMIT.perMin} 次，全天 ${LIMIT.daily} 次）` + (HOST === '127.0.0.1' ? '' : '\n注意: 现在局域网里的人都能访问。')); });

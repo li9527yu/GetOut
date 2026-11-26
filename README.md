@@ -26,7 +26,7 @@ npm start              # 打开 http://localhost:8787
 | `LLM_BURST` | 20 | 每个地址短时间内最多连发多少次 |
 | `LLM_DAILY_MAX` | 5000 | 所有人加起来每天最多多少次，到顶后游戏退回纯规则 |
 
-要放到公网，建议前面再放一层 Caddy 或 nginx 做 HTTPS，并在模型服务商那边给密钥设消费上限。
+要放到服务器上给别人玩，照着 [DEPLOY.md](DEPLOY.md) 做：里面有部署步骤、日志怎么看、监控和告警怎么配、出问题怎么查。
 
 ## 目录
 
@@ -42,6 +42,7 @@ npm start              # 打开 http://localhost:8787
 | `game/test/` | 自动跑局和界面冒烟测试 |
 | `逃出绝命课题组-设计文档.md` | 完整设计文档 |
 | `balance_sim.py` | 早期的数值模拟脚本，已经落后于游戏里的规则 |
+| `DEPLOY.md`、`deploy/` | 部署手册，以及 systemd、Caddy、巡检脚本的现成配置 |
 
 ## 往里加东西
 

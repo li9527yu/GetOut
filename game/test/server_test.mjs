@@ -82,6 +82,14 @@ await sleep(400); ctl.abort(); await pending; await sleep(500);
 check('玩家断开后，发给模型的请求被取消', upstreamAborted === a0 + 1, '取消 ' + (upstreamAborted - a0) + ' 次');
 slow = 0;
 
+// —— 运行情况和日志 ——
+r = await fetch(BASE + '/stats'); const st = await J(r);
+check('本机能看运行情况，里面有各接入点的统计', r.status === 200 && st && st.各接入点 && st.各接入点.rest && st.各接入点.rest.调用 >= 1 && st.今天已调用 >= 1, st ? '今天已调用 ' + st.今天已调用 + '，被拒绝 ' + JSON.stringify(st.被拒绝) : '');
+r = await fetch(BASE + '/stats', { headers: { 'x-forwarded-for': '1.2.3.4' } }); check('经代理转进来的人看不到运行情况', r.status === 404, '状态 ' + r.status);
+const lines = log.split('\n').filter((l) => l[0] === '{').map((l) => { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean);
+check('日志是一行一个 JSON，有启动、调用、拒绝三种', ['start', 'llm', 'reject'].every((ev) => lines.some((l) => l.ev === ev)), '共 ' + lines.length + ' 行');
+check('日志里没有玩家的字和模型的话', !/好的|爬山|帖子/.test(lines.filter((l) => l.ev !== 'start').map((l) => JSON.stringify(l)).join('')));
+
 check('全程服务没有退出', alive(), alive() ? '' : '退出码 ' + exited + '\n' + log.slice(-400));
 srv.kill(); upstream.close();
 const bad = results.filter((x) => !x).length;
