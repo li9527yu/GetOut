@@ -1,4 +1,4 @@
-// 逃出绝命课题组 · 本地服务: 提供游戏页面，并把大模型请求转给一个 OpenAI 兼容的接口（现在配的是阿里云百炼的 Qwen）。
+// 逃出绝命课题组 · 本地服务: 提供游戏页面，并把大模型请求转给一个 OpenAI 兼容的接口（现在配的是 DeepSeek）。
 // 用法:  npm start   然后打开 http://localhost:8787
 // 配置写在同目录的 .env 里: LLM_BASE_URL、LLM_API_KEY、LLM_MODEL（快的）、LLM_MODEL_STRONG（文笔好的）。密钥只在这个服务里，不进浏览器。
 // 没有配置也能启动: 这时 /llm/health 返回 ok:false，游戏按纯规则运行。
@@ -19,11 +19,23 @@ const PORT = +(process.env.PORT || 8787);
 const HOST = process.env.HOST || '127.0.0.1';
 const BASE = (process.env.LLM_BASE_URL || '').replace(/\/$/, '');
 const KEY = process.env.LLM_API_KEY || '';
-const MODEL = process.env.LLM_MODEL || 'qwen3.6-flash';              // 快而便宜: 群聊、同门回话、自由回复
+const MODEL = process.env.LLM_MODEL || 'deepseek-flash';              // 快而便宜: 群聊、同门回话、自由回复
 const MODEL_STRONG = process.env.LLM_MODEL_STRONG || MODEL;            // 文笔要求高、又不用玩家等的: 临场事件、结局致谢
 // 放在 Caddy / nginx 后面时设 TRUST_PROXY=1: 这时连进来的都是代理，玩家的地址要从 X-Forwarded-For 里取，限流才是按人算的
 const TRUST_PROXY = process.env.TRUST_PROXY === '1';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';      // 从别的机器看 /stats 时用；不设就只有本机能看
+// 模型的「思考」默认关掉。开着的话一次调用要多等好几秒（DeepSeek 的 v4-pro 实测 6 到 8 秒），超过界面最多等的时间，玩家看不到回话。
+// 只有在环境配置里明确写了 LLM_THINKING=1 才开。
+// 各家关思考的参数不一样: DeepSeek 用 thinking:{type:'disabled'}，阿里云百炼用 enable_thinking:false。
+// 服务按接口地址认是哪一家；认不出来时用 LLM_PROVIDER=deepseek 或 aliyun 指明。别家的关法写在 LLM_EXTRA 里（一行 JSON，原样并进每次请求）。
+const THINKING = /^(1|true|on|yes)$/i.test(process.env.LLM_THINKING || '');
+const PROVIDER = (process.env.LLM_PROVIDER || (/deepseek/i.test(BASE) ? 'deepseek' : /aliyuncs|dashscope/i.test(BASE) ? 'aliyun' : '')).toLowerCase();
+const NO_THINK = (() => {
+  let extra = {};
+  if (process.env.LLM_EXTRA) { try { extra = JSON.parse(process.env.LLM_EXTRA); } catch (e) { console.error('[llm] LLM_EXTRA 不是合法的 JSON，忽略'); } }
+  const off = THINKING ? {} : PROVIDER === 'deepseek' ? { thinking: { type: 'disabled' } } : PROVIDER === 'aliyun' ? { enable_thinking: false } : {};
+  return Object.assign({}, off, extra);
+})();
 const TIMEOUT = 15000;                  // 界面最多等 9 秒，再久也没人看了
 
 const WORLD = `你在为一款中文网页文字游戏《逃出绝命课题组》写台词。玩家扮演硕士研究生「萝卜」，在三年里和导师、同门周旋。
@@ -254,7 +266,7 @@ async function ask(slot, payload, signal, meta) {
   const def = SLOTS[slot];
   const j = await chat({
     model: def.strong ? MODEL_STRONG : MODEL, temperature: 1.0, max_tokens: 900,
-    enable_thinking: false,                      // 要的是快，不要深度思考
+    ...NO_THINK,                                 // 要的是快，不要深度思考
     response_format: { type: 'json_object' },
     messages: [{ role: 'system', content: def.system + corpusHint(slot) + '\n' + def.shape }, { role: 'user', content: JSON.stringify(payload) }],
   }, signal);
@@ -271,7 +283,7 @@ async function health() {
   if (healthy === false && Date.now() - healthAt < 45000) return false;
   healthAt = Date.now();
   if (!BASE || !KEY) { if (healthy === null) console.error('[llm] 没有配置 LLM_BASE_URL / LLM_API_KEY，游戏按规则运行。'); healthy = false; }
-  else healthy = !!(await chat({ model: MODEL, max_tokens: 5, enable_thinking: false, messages: [{ role: 'user', content: '在吗' }] }));
+  else healthy = !!(await chat({ model: MODEL, max_tokens: 5, ...NO_THINK, messages: [{ role: 'user', content: '在吗' }] }));
   return healthy;
 }
 
@@ -391,4 +403,5 @@ process.on('unhandledRejection', (err) => { STATS.errors += 1; log('error', { wh
 process.on('uncaughtException', (err) => { STATS.errors += 1; log('error', { where: 'uncaughtException', msg: err && err.message }); });
 // systemd / docker 停服务时发 SIGTERM: 不再接新请求，等手上的跑完再退，最多等 10 秒
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { log('stop', { sig }); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 10000).unref(); });
-server.listen(PORT, HOST, () => { log('start', { port: PORT, host: HOST, model: MODEL, strong: MODEL_STRONG, perMin: LIMIT.perMin, daily: LIMIT.daily, trustProxy: TRUST_PROXY, keySet: !!KEY }); console.log(`逃出绝命课题组: http://localhost:${PORT}  （模型 ${MODEL} / ${MODEL_STRONG}；每个地址每分钟 ${LIMIT.perMin} 次，全天 ${LIMIT.daily} 次）` + (HOST === '127.0.0.1' ? '' : '\n注意: 现在局域网里的人都能访问。')); });
+server.listen(PORT, HOST, () => { log('start', { port: PORT, host: HOST, model: MODEL, strong: MODEL_STRONG, thinking: THINKING, provider: PROVIDER || '认不出', extra: Object.keys(NO_THINK), perMin: LIMIT.perMin, daily: LIMIT.daily, trustProxy: TRUST_PROXY, keySet: !!KEY }); console.log(`逃出绝命课题组: http://localhost:${PORT}  （模型 ${MODEL} / ${MODEL_STRONG}；每个地址每分钟 ${LIMIT.perMin} 次，全天 ${LIMIT.daily} 次）` + (HOST === '127.0.0.1' ? '' : '\n注意: 现在局域网里的人都能访问。')
+  + (THINKING ? '\n注意: 模型的思考打开了（LLM_THINKING=1）。回话会明显变慢，可能超过界面的等待时间。' : !PROVIDER && KEY && !process.env.LLM_EXTRA ? '\n注意: 认不出这是哪家的模型接口，没法替你关掉思考。如果它默认会思考，请设 LLM_PROVIDER 或 LLM_EXTRA。' : '')); });

@@ -62,12 +62,15 @@ sudo ufw allow 80,443/tcp && sudo ufw enable
 |---|---|---|---|
 | `LLM_BASE_URL` | 是 | | 模型接口地址，到 `/v1` 为止 |
 | `LLM_API_KEY` | 是 | | 密钥 |
-| `LLM_MODEL` | | `qwen3.6-flash` | 便宜快的模型，只改写措辞的地方用 |
+| `LLM_MODEL` | | `deepseek-flash` | 便宜快的模型，只改写措辞的地方用 |
 | `LLM_MODEL_STRONG` | | 同上 | 要做判断、文笔要求高的地方用 |
 | `LLM_PER_MIN` | | 30 | 每个玩家每分钟最多调多少次模型 |
 | `LLM_BURST` | | 20 | 每个玩家短时间内最多连发多少次 |
 | `LLM_DAILY_MAX` | | 5000 | 所有人加起来每天最多多少次，到顶后游戏退回纯规则 |
 | `ADMIN_TOKEN` | | 空 | 想从别的机器看运行情况时设一个长随机串 |
+| `LLM_THINKING` | | 关 | 模型的「思考」。默认关掉；写 `1` 才打开。打开后回话会慢好几秒，可能超过界面的等待时间 |
+| `LLM_PROVIDER` | | 按地址自动认 | `deepseek` 或 `aliyun`。服务靠它决定用哪个参数关思考；接口地址里看不出是哪家时才需要填 |
+| `LLM_EXTRA` | | 空 | 每次请求额外带的参数，写成一行 JSON。别家模型要用别的参数关思考时填 |
 
 `HOST`、`PORT`、`TRUST_PROXY` 已经写在服务单元里，不用放进 `.env`。
 
@@ -191,7 +194,7 @@ sudo crontab -e
 
 在控制台设消费告警（比如日消费超过某个数发短信）。服务端的每日上限按进程计，重启会清零；服务商那边的数字才是准的。
 
-成本参考：实测一次调用的输入约 1200 token（只测了一次，各接入点会有出入），一局游戏大约 100 到 150 次调用。上线后用第 5 节的查询看真实数字。
+成本参考：一次调用的输入约 1200 到 3500 token（提示词加这一局的上下文），输出几十到两百多；一局游戏大约 100 到 150 次调用。现在配的是 DeepSeek 的 `deepseek-flash` 和 `deepseek-v4-pro`。上线后用第 5 节的查询看真实数字。
 
 ## 7. 备份
 
@@ -217,7 +220,7 @@ sudo crontab -e
 | 能打开，但话都是固定的 | `curl -s 127.0.0.1:8787/llm/health` | 密钥错了或过期；额度用完；服务商故障。修好后不用重启，45 秒内自动恢复 |
 | 部分玩家没有模型 | `journalctl -u getout --since "10 min ago" -o cat \| grep reject` | 被限流。多人共用一个出口地址时把 `LLM_PER_MIN` 调大 |
 | 所有人下午开始没有模型 | `curl -s 127.0.0.1:8787/stats \| grep 今天` | 到了每日上限。调大 `LLM_DAILY_MAX` 后重启 |
-| 回话很慢，经常等不到 | `/stats` 里的平均毫秒和「超过 7 秒」 | 服务商慢。把 `LLM_MODEL_STRONG` 换成和 `LLM_MODEL` 一样的快模型 |
+| 回话很慢，经常等不到 | `/stats` 里的平均毫秒和「超过 7 秒」 | 模型在思考。看启动日志那一行的 `thinking`：是 `true` 说明配了 `LLM_THINKING=1`，去掉它；是 `false` 但 `provider` 是「认不出」，说明服务不知道怎么替这家关，填 `LLM_PROVIDER` 或 `LLM_EXTRA`（DeepSeek 开着思考一次要 6 到 8 秒，关掉约 2 秒）；或者服务商本身慢，把 `LLM_MODEL_STRONG` 换成和 `LLM_MODEL` 一样的快模型 |
 | 进程反复重启 | `journalctl -u getout -n 50` | 看最后几行 `error`。内存超过 400 MB 会被 systemd 杀掉重启 |
 | 投稿都失败 | `ls -l /opt/getout/game/quotes.jsonl` | 文件到了 2 MB 上限：归档后清空；或者目录权限不对 |
 | 限流不按人算，一个人刷大家都被挡 | 日志里的 `ip` 是不是都是 `127.0.0.1` | 服务单元里没有 `TRUST_PROXY=1` |

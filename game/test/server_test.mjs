@@ -9,19 +9,19 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const UP = 8797, PORT = 8798, BASE = 'http://127.0.0.1:' + PORT;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-let upstreamCalls = 0, upstreamAborted = 0, lastSystem = '', slow = 0;
+let upstreamCalls = 0, upstreamAborted = 0, lastSystem = '', slow = 0, lastBody = null;
 const upstream = http.createServer((req, res) => {
   let raw = ''; req.on('data', (c) => { raw += c; });
   req.on('end', () => {
     upstreamCalls += 1;
-    try { lastSystem = JSON.parse(raw).messages[0].content; } catch (e) { lastSystem = ''; }
+    try { lastBody = JSON.parse(raw); lastSystem = lastBody.messages[0].content; } catch (e) { lastSystem = ''; lastBody = null; }
     res.on('close', () => { if (!res.writableEnded) upstreamAborted += 1; });
     setTimeout(() => { if (res.destroyed) return; res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ choices: [{ message: { content: '{"text":"好的"}' } }] })); }, slow);
   });
 }).listen(UP, '127.0.0.1');
 
 const srv = spawn(process.execPath, ['server.mjs'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
-  env: Object.assign({}, process.env, { PORT: String(PORT), HOST: '127.0.0.1', LLM_BASE_URL: 'http://127.0.0.1:' + UP, LLM_API_KEY: 'test-key', LLM_MODEL: 'fake', LLM_MODEL_STRONG: 'fake', LLM_BURST: '8', LLM_PER_MIN: '30', LLM_DAILY_MAX: '40' }) });
+  env: Object.assign({}, process.env, { PORT: String(PORT), HOST: '127.0.0.1', LLM_BASE_URL: 'http://127.0.0.1:' + UP, LLM_API_KEY: 'test-key', LLM_MODEL: 'fake', LLM_MODEL_STRONG: 'fake', LLM_BURST: '8', LLM_PER_MIN: '30', LLM_DAILY_MAX: '40', LLM_PROVIDER: 'deepseek', LLM_THINKING: '', LLM_EXTRA: '' }) });
 let exited = null; srv.on('exit', (code) => { exited = code; });
 let log = ''; srv.stdout.on('data', (d) => { log += d; }); srv.stderr.on('data', (d) => { log += d; });
 await sleep(900);
@@ -52,6 +52,7 @@ r = await post('/llm', { slot: 'rest', payload: { 帖子: '字'.repeat(4000) } }
 r = await post('/llm', { slot: 'rest', payload: { 活动: '爬山' } }); const ok1 = await J(r);
 check('正常请求能通，模型的话能回来', r.status === 200 && ok1 && ok1.result && ok1.result.text === '好的', JSON.stringify(ok1));
 check('发给模型的是游戏的提示词', /逃出绝命课题组/.test(lastSystem));
+check('默认带着关掉思考的参数', !!lastBody && !!lastBody.thinking && lastBody.thinking.type === 'disabled', JSON.stringify(lastBody && lastBody.thinking));
 
 // —— 别的网站借不了 ——
 r = await post('/llm', { slot: 'rest', payload: {} }, { 'content-type': 'text/plain' }); check('不是 JSON 头的请求被拒', r.status === 403, '状态 ' + r.status);
@@ -89,6 +90,15 @@ r = await fetch(BASE + '/stats', { headers: { 'x-forwarded-for': '1.2.3.4' } });
 const lines = log.split('\n').filter((l) => l[0] === '{').map((l) => { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean);
 check('日志是一行一个 JSON，有启动、调用、拒绝三种', ['start', 'llm', 'reject'].every((ev) => lines.some((l) => l.ev === ev)), '共 ' + lines.length + ' 行');
 check('日志里没有玩家的字和模型的话', !/好的|爬山|帖子/.test(lines.filter((l) => l.ev !== 'start').map((l) => JSON.stringify(l)).join('')));
+
+// —— 思考: 只有明确配了 LLM_THINKING=1 才开 ——
+{
+  const srv2 = spawn(process.execPath, ['server.mjs'], { cwd: ROOT, stdio: 'ignore', env: Object.assign({}, process.env, { PORT: '8796', HOST: '127.0.0.1', LLM_BASE_URL: 'http://127.0.0.1:' + UP, LLM_API_KEY: 'test-key', LLM_MODEL: 'fake', LLM_MODEL_STRONG: 'fake', LLM_PROVIDER: 'deepseek', LLM_THINKING: '1', LLM_EXTRA: '' }) });
+  await sleep(900); lastBody = null;
+  await fetch('http://127.0.0.1:8796/llm', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ slot: 'rest', payload: {} }) }).catch(() => null);
+  check('配了 LLM_THINKING=1 之后不再带关思考的参数', !!lastBody && lastBody.thinking === undefined && lastBody.enable_thinking === undefined, lastBody ? '请求里的键: ' + Object.keys(lastBody).join(',') : '没收到请求');
+  srv2.kill();
+}
 
 check('全程服务没有退出', alive(), alive() ? '' : '退出码 ' + exited + '\n' + log.slice(-400));
 srv.kill(); upstream.close();

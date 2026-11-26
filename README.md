@@ -14,7 +14,7 @@ cp .env.example .env   # 填上自己的模型地址和密钥
 npm start              # 打开 http://localhost:8787
 ```
 
-服务端没有任何依赖，需要 Node 18 以上。模型走 OpenAI 兼容接口。
+服务端没有任何依赖，需要 Node 18 以上。模型走 OpenAI 兼容接口，现在配的是 DeepSeek（`deepseek-flash` 负责改写措辞，`deepseek-v4-pro` 负责判断和生成）。
 
 默认只有本机能访问。要让同一个 Wi-Fi 下的手机打开，用 `HOST=0.0.0.0 npm start`。
 
