@@ -689,11 +689,13 @@
     freshWeek = shown.cur !== S.cur;
     const kids = chat.children;
     if (freshWeek) shown = { cur: S.cur, n: kids.length && kids[0].classList && kids[0].classList.contains('past') ? 1 : 0 };
-    for (let i = shown.n; i < kids.length; i++) { const dl = (weekCard ? 0.75 : autoFlow && freshWeek ? 0.7 : 0) + Math.min(1.8, (i - shown.n) * 0.26); kids[i].classList.add('in'); kids[i].style.animationDelay = dl + 's'; kids[i].style.setProperty('--d', dl + 's'); }
+    // 自动接上的下一周晚一点再出来，先让人把上一周的结算看完
+    const base = weekCard ? 0.75 : autoFlow && freshWeek ? 1.5 : 0;
+    for (let i = shown.n; i < kids.length; i++) { const dl = base + Math.min(1.8, (i - shown.n) * 0.26); kids[i].classList.add('in'); kids[i].style.animationDelay = dl + 's'; kids[i].style.setProperty('--d', dl + 's'); }
     const first = kids[shown.n] || null, fresh = kids.length - shown.n;
     // 新消息一条条出来，底下的选项等最后一条出来了再亮
     const dockEl = app.querySelector('#app > .dock') || app.querySelector('.dock');
-    if (dockEl && fresh >= 2 && !V.waitFlavor && !(S.cur && S.cur.dm && !S.cur.dm.closed)) { dockEl.style.animation = 'msgin .3s ease-out ' + ((weekCard ? 0.75 : 0) + Math.min(1.8, (fresh - 1) * 0.26) + 0.2).toFixed(2) + 's both'; }
+    if (dockEl && fresh >= 2 && !V.waitFlavor && !(S.cur && S.cur.dm && !S.cur.dm.closed)) { dockEl.style.animation = 'msgin .3s ease-out ' + (base + Math.min(1.8, (fresh - 1) * 0.26) + 0.2).toFixed(2) + 's both'; }
     // 学业预警第一次出现时砸下来
     const ac = app.querySelector('.acad'), wasWarn = warnSeen.ref === S && warnSeen.v;
     if (ac && !wasWarn && warnSeen.ref === S && canAnim()) { ac.classList.add('slam'); const st = app.querySelector('.status'); if (st) st.classList.add('flash'); }
