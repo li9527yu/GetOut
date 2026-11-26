@@ -1,0 +1,110 @@
+{
+  "_说明": "事件数据格式的样例，对应设计文档 10.4 节。选项里没写 effects 的，按口气的默认效果结算（10.5 节）。",
+  "events": [
+    {
+      "id": "chore_invoice_01",
+      "layer": "导师专属",
+      "kind": "杂活",
+      "mentor": "行政领导",
+      "stage": [1, 2, 3],
+      "when": [],
+      "weight": 10,
+      "once": true,
+      "speaker": "{导师称呼}",
+      "text": "小萝，帮我把这 {数量} 张发票贴一下，按日期排。有几张日期看不清，你看着办。",
+      "vars": { "数量": [23, 47, 112] },
+      "options": [
+        { "tone": "怂", "text": "好的老师", "effects": { "demand": 1 } },
+        { "tone": "刚", "text": "老师我周三有课" },
+        { "tone": "歪", "text": "（装没看见）" }
+      ]
+    },
+    {
+      "id": "pressure_midnight_01",
+      "layer": "导师专属",
+      "kind": "施压",
+      "mentor": "青椒卷王",
+      "stage": [1, 2, 3],
+      "when": [],
+      "weight": 10,
+      "once": true,
+      "speaker": "{导师称呼}",
+      "text": "02:47 在吗？刚想到个 idea。不急，你醒了再看。\n02:49 醒了吗？",
+      "options": [
+        { "tone": "怂", "text": "秒回", "effects": { "favor": 3, "san": -4, "assim": 3 } },
+        { "tone": "刚", "text": "早上再回" },
+        { "tone": "歪", "text": "把手机扔远一点" }
+      ]
+    },
+    {
+      "id": "peer_omen_centrifuge",
+      "layer": "同门状态",
+      "kind": "无",
+      "mentor": "*",
+      "stage": [1, 2, 3],
+      "when": ["peer.师兄.persona == 离心机之友", "peer.师兄.pressure >= 50"],
+      "weight": 100,
+      "once": true,
+      "speaker": "旁白",
+      "text": "{师兄}今天对着离心机说了二十分钟话。离心机没有回答。你觉得他在等。",
+      "options": [
+        { "tone": "怂", "text": "假装没看见", "effects": {} },
+        { "tone": "刚", "text": "陪他坐一会儿", "effects": { "help": "师兄" } },
+        { "tone": "歪", "text": "也跟离心机打个招呼", "effects": { "san": 2, "rel": { "师兄": 5 }, "flag": "talked_to_centrifuge" } }
+      ]
+    },
+    {
+      "id": "promise_authorship_01",
+      "layer": "导师专属",
+      "kind": "承诺",
+      "mentor": "横向老板",
+      "stage": [2, 3],
+      "when": [],
+      "weight": 10,
+      "once": true,
+      "speaker": "{导师称呼}",
+      "text": "这个项目做完，给你署名，再放你去实习。\n这是他第三次说这句话。",
+      "options": [
+        { "tone": "怂", "text": "信他", "effects": { "favor": 2, "assim": 3 }, "next": { "id": "promise_authorship_due", "delay": 4 } },
+        { "tone": "刚", "text": "能写下来吗", "check": { "base": 0.1, "per": { "人情": 0.08, "放人度": 0.08 } }, "effects": { "evidence": 1 }, "fail_effects": { "favor": -5 } },
+        { "tone": "歪", "text": "那我先去实习？" }
+      ],
+      "reveal": "人品"
+    },
+    {
+      "id": "guide_blockchain",
+      "layer": "通用",
+      "kind": "指导",
+      "mentor": "*",
+      "stage": [1, 2, 3],
+      "when": ["thesis.blocked", "mentor.水平 <= 2", "last_unblock == mentor", "misguided"],
+      "weight": 100,
+      "once": true,
+      "speaker": "旁白",
+      "text": "导师看完你的方法部分，沉思良久：「加个区块链试试。」\n你研究的是{课题方向}。",
+      "options": [
+        { "tone": "怂", "text": "照做", "effects": { "thesis": -5 } },
+        { "tone": "刚", "text": "委婉拒绝", "effects": { "favor": -5 } },
+        { "tone": "歪", "text": "问问 AI 区块链和{课题方向}有什么关系", "when": ["ai.unlocked"], "effects": { "san": 3, "ai_rate": 3 } }
+      ],
+      "reveal": "水平"
+    },
+    {
+      "id": "ai_unlock_junior",
+      "layer": "AI",
+      "kind": "无",
+      "mentor": "*",
+      "stage": [2, 3],
+      "when": ["!ai.unlocked", "peer.师弟.rel >= 50"],
+      "weight": 100,
+      "once": true,
+      "speaker": "{师弟}",
+      "text": "师兄，你综述还一个字一个字写啊？\n他把屏幕转过来。光标在自己动。",
+      "options": [
+        { "tone": "怂", "text": "这不算作弊吗", "effects": { "unlock": "ai" } },
+        { "tone": "刚", "text": "教教我", "effects": { "unlock": "ai", "rel": { "师弟": 5 } } },
+        { "tone": "歪", "text": "别让老师知道", "effects": { "unlock": "ai" } }
+      ]
+    }
+  ]
+}

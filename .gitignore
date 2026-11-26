@@ -1,0 +1,8 @@
+# 密钥和本地数据不进仓库
+.env
+game/.env
+game/quotes.jsonl
+node_modules/
+.DS_Store
+__pycache__/
+*.pyc
