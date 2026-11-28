@@ -16,6 +16,7 @@ window.__noAnim=true;   // 截图脚本是同步连点的，不能等过渡动�
     result:()=>g.S&&g.S.t>=5&&g.S.cur&&g.S.cur.result&&g.S.cur.result.lines.length>=2,
     short:()=>/怎么交代/.test(app.innerHTML), gate:()=>/stampbox/.test(app.innerHTML)&&/申请表/.test(app.innerHTML), goal:()=>/去向意向/.test(app.innerHTML),
     end0:()=>/学籍状态变更通知/.test(app.innerHTML), end1:()=>/thesis-page/.test(app.innerHTML), end2:()=>/已解密/.test(app.innerHTML), end3:()=>/本次新增归档/.test(app.innerHTML),
+    prank:()=>g.S&&g.S.cur&&g.S.cur.event&&/^pk_/.test(g.S.cur.event.id||''),
     flow:()=>g.S&&g.S.t%4===2&&!!app.querySelector('.past')&&g.S.cur&&!g.S.cur.result,
     semcard:()=>g.S&&g.S.t===4&&g.S.cur&&g.S.cur.result&&g.S.cur.result.next==='turn',
     file:()=>false, title:()=>true, book:()=>false };
@@ -23,7 +24,18 @@ window.__noAnim=true;   // 截图脚本是同步连点的，不能等过渡动�
   function click0(){const bs=[...app.querySelectorAll('button[data-act]:not([disabled])')].filter(b=>!['file','hole','book','home','closeSheet','new','tab'].includes(b.dataset.act));const c=bs.find(b=>b.dataset.act==='confirm'&&/就这样|熬过|没有精力/.test(b.textContent));const b=(c&&Math.random()<.6)?c:bs[Math.floor(Math.random()*bs.length)];if(b)b.click();}
   if(want==='busydemo'){g.acts.new({});for(let i=0;i<6000&&!(g.S&&g.S.t>=6&&/本周精力/.test(app.innerHTML));i++)click0();app.insertAdjacentHTML('beforeend','<div class="busy"><div class="busy-card"><div class="busy-dots"><i></i><i></i><i></i></div><div>对方正在输入…</div><div class="busy-bar"><i></i></div></div></div>');return;}
   if(want==='title')return;
-  if(want==='reborn'||want==='reborn2'){for(let n=0;n<(want==='reborn'?2:5);n++){g.acts.new({});if(/重生办事大厅/.test(app.innerHTML))g.acts.rbGo({});for(let i=0;i<6000&&!/本次新增归档/.test(app.innerHTML);i++)click0();}g.acts.new({});if(want==='reborn2'){const q=app.querySelector('[data-act=rbPerk]:not([disabled])');if(q)q.click();}return;}
+  // #end:结局名[:第几页] —— 截某个结局的页面。少见的结局随机点不出来，这里边玩边把条件垫上，页面本身还是引擎和界面真实画出来的
+  if(decodeURIComponent(want).slice(0,4)==='end:'){const ps=decodeURIComponent(want).split(':'),nm=ps[1],step=+(ps[2]||0);
+    const set={'导师来给你打工':S=>{S.flags.startup=true;},'年薪千万':S=>{S.flags.bigOffer=true;},'把导师送进去':S=>{S.unionOk=true;S.evidence=3;},'换了个老板':S=>{S.rich={ctrl:2,kind:'甲方'};},'天龙人':S=>{}}[nm];
+    for(let n=0;n<(set?12:300);n++){g.acts.new({});
+      for(let i=0;i<6000&&!(g.S&&g.S.ended);i++){const S=g.S;if(set&&S&&S.phase!=='intro'){S.san=Math.max(S.san,80);S.favor=Math.max(S.favor,75);S.thesis=100;S.contrib=Math.max(S.contrib,90);if(S.goal)S.chips=100;if(S.paper)S.paper.state='accepted';set(S);}
+        const bs=[...app.querySelectorAll('button[data-act]:not([disabled])')].filter(b=>!['file','hole','book','home','closeSheet','new','tab'].includes(b.dataset.act)&&!/退学|不读了/.test(b.textContent));const sh=app.querySelector('.sheet'),pool=sh?bs.filter(x=>sh.contains(x)):bs,cf=!sh&&Math.random()<.6&&pool.find(x=>x.dataset.act==='confirm'),b=cf||pool[Math.floor(Math.random()*pool.length)];if(b)b.click();else break;}
+      for(let k=0;k<6&&/stampbox|申请表/.test(app.innerHTML)&&!/学籍状态变更通知/.test(app.innerHTML);k++)g.acts.gateNext({});
+      if(g.S&&g.S.ended&&g.S.ended.name===nm){for(let k=0;k<step;k++)g.acts.endNext({});document.title='HIT';return;}
+      for(let i=0;i<20&&!/本次新增归档/.test(app.innerHTML);i++)g.acts.endNext({});}
+    document.title='MISS '+(g.S&&g.S.ended&&g.S.ended.name);return;}
+  // #admit2: 读完几局、手里有重生点之后的报到页
+  if(want==='admit2'){for(let n=0;n<4;n++){g.acts.new({});for(let i=0;i<6000&&!/本次新增归档/.test(app.innerHTML);i++)click0();}g.acts.new({});const q=app.querySelector('[data-act=dPerk]:not([disabled])');if(q)q.click();return;}
   if(want.slice(0,4)==='book'){for(let n=0;n<14;n++){g.acts.new({});for(let i=0;i<4000&&!/本次新增归档/.test(app.innerHTML);i++)click();}g.acts.book({});if(want.length>4)g.acts.tab({i:+want[4]});if(want[5]==='s'){const sc=app.querySelector('.scroll');sc.scrollTop=900;}if(want[5]==='o'){const d=app.querySelector('details.mfold');if(d)d.open=true;}return;}
   g.acts.new({});
   function click(){const bs=[...app.querySelectorAll('button[data-act]:not([disabled])')].filter(b=>!['file','hole','book','home','closeSheet','new','tab'].includes(b.dataset.act));

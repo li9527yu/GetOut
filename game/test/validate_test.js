@@ -27,6 +27,7 @@ const junk = (depth) => {
 };
 /** 一半是纯垃圾，一半是「形状对、内容坏」的，后一种更容易钻过校验。 */
 const shaped = {
+  recap: () => ({ mentor: pick(NASTY), me: pick(NASTY), lab: pick([pick(NASTY), 3, null]), peers: pick([{ 师兄: pick(NASTY), 同级: 5, __proto__: null }, { constructor: 'x' }, 'str', null]) }),
   free: () => ({ tone: pick(['怂', '刚', '歪', '骂', 1]), edge: pick(PRIM), reply: pick(NASTY), reply_fail: pick(NASTY), effects: { favor: pick(PRIM), san: pick(PRIM), demand: pick(PRIM), thesis: pick(PRIM), contrib: pick(PRIM), rel: { [pick(SLOTS)]: pick(PRIM), [pick(SLOTS)]: pick(PRIM) } },
     aside: { who: pick(SLOTS), text: pick(NASTY) }, echo: { who: pick(SLOTS), text: pick(NASTY) } }),
   bold: () => ({ edge: pick(PRIM), reply: pick(NASTY), reply_fail: pick(NASTY) }),
@@ -76,7 +77,7 @@ for (let g = 0; g < N; g++) {
   let guard = 0;
   while (!s.ended && guard++ < 60) {
     const c = safe('beginTurn', () => Eng.beginTurn(s)); if (!c) break;
-    safe('applyFlavor', () => Eng.applyFlavor(s, evil('turn'))); safe('applyPeerLines', () => Eng.applyPeerLines(s, evil('peers'))); safe('addGenerated', () => Eng.addGenerated(s, evil('event'))); calls += 3;
+    safe('applyFlavor', () => Eng.applyFlavor(s, evil('turn'))); safe('applyRecap', () => { const ctx = Eng.closeSemester(s); Eng.applyRecap(s, ctx ? ctx.学期 : '研一上', evil('recap')); }); safe('applyPeerLines', () => Eng.applyPeerLines(s, evil('peers'))); safe('addGenerated', () => Eng.addGenerated(s, evil('event'))); calls += 3;
     inspect(s, '周初');
     if (Eng.canHole(s) && rnd() < 0.7) { safe('holePost', () => Eng.holePost(s, pick(NASTY) || '今天又被说了', evil('hole'))); calls++; }
     if (c.dm) { let r = 0; while (!c.dm.done && r++ < 5) { const k = rnd() < 0.5 ? pick(c.dm.opts).k : pick(['constructor', 'nope', 1, null]); safe('dmPick', () => Eng.dmPick(s, k, evil('dm'))); calls++; } if (!c.dm.done) bad('私聊收不了尾'); }

@@ -12,7 +12,7 @@ C.events.forEach((e) => {
 });
 C.endingOrder.forEach((n) => { if (!C.endings[n]) problems.push('缺结局文本: ' + n); });
 function plan(s, c, style) {
-  const cells = Eng.cells(s), p = { lab: 0, thesis: 0, chips: 0, heal: 0, help: 0, slack: 0, rewrite: 0 };
+  const cells = Eng.cells(s), p = { lab: 0, thesis: 0, chips: 0, heal: 0, help: 0, slack: 0, rewrite: 0, fun: 0 };
   let ap = c.ap;
   const give = (k, n) => { n = Math.max(0, Math.min(ap, n)); p[k] += n; ap -= n; };
   if (style === 'random') { while (ap > 0) give(cells[Math.floor(rnd() * cells.length)], 1); }
@@ -33,7 +33,8 @@ function plan(s, c, style) {
       else give(cells.indexOf(rest) >= 0 ? rest : 'thesis', 1);
     }
   }
-  p.short = ['plain', 'dump', 'lie', 'ask'][Math.floor(rnd() * 4)];
+  p.short = Eng.freeOn(s) && rnd() < 0.7 ? 'done' : ['plain', 'dump', 'lie', 'ask'][Math.floor(rnd() * 4)];
+  if (Eng.freeOn(s) && style !== 'random') { const k = cells.indexOf('fun') >= 0 ? 'fun' : 'heal'; p.lab = Math.min(p.lab, 1); p.thesis = 0; p.chips = 0; p[k] += c.ap - Object.keys(p).filter((x) => typeof p[x] === 'number' && x !== k).reduce((n, x) => n + p[x], 0) - p[k]; }
   p.aiLab = s.ai.unlocked && rnd() < 0.3; p.aiThesis = s.ai.unlocked && rnd() < 0.3;
   const np = Eng.normalPeers(s);
   if (np.length) { p.dumpTo = np[Math.floor(rnd() * np.length)].slot; p.helpTo = s.omenSlot || np[0].slot; }
@@ -42,7 +43,7 @@ function plan(s, c, style) {
 }
 // 各种开局: 普通的占一半（上面的统计只算普通局），其余轮着试天龙人、金手指、保底、受苦
 const STARTS = [['天龙人 B1', { tl: 'B1' }], ['天龙人 B2', { tl: 'B2' }], ['天龙人 B3', { tl: 'B3' }], ['天龙人 B4', { tl: 'B4' }], ['天龙人 B5', { tl: 'B5' }], ['假天龙人', { tl: 'B6' }],
-  ['好导师', { good: true }], ['金手指全带', { perks: { know: true, favor: true, senior: true, shield: true, paper: true } }], ['受苦', { hard: true }]];
+  ['教学局', { tl: 'B2', good: true, tut: true }], ['好导师', { good: true }], ['加强过的', { boost: { nao: 1, gan: 1, fangren: 1, renpin: 1 }, perks: { favor: true } }], ['金手指全带', { perks: { know: true, favor: true, senior: true, shield: true, paper: true } }], ['受苦', { hard: true }]];
 const byStart = {}, allMet = Object.keys(C.mentors).reduce((o, k) => { o[k] = true; return o; }, {});
 for (let n0 = 0; n0 < N * 2; n0++) {
   const special = n0 >= N, n = n0 % N, style = special ? ['balanced', 'obey', 'selfish'][n % 3] : styles[n % styles.length];

@@ -48,7 +48,7 @@ r = await post('/llm', '[]'); check('请求体是数组', r.status === 400 && al
 const before = upstreamCalls;
 for (const slot of ['constructor', '__proto__', 'toString', 'nope', 123, null]) { r = await post('/llm', { slot, payload: {} }); if (r.status !== 400) check('乱填接入点 ' + slot, false, '状态 ' + r.status); }
 check('乱填的接入点都被挡下，没有一次到模型', upstreamCalls === before, '到模型 ' + (upstreamCalls - before) + ' 次');
-r = await post('/llm', { slot: 'rest', payload: { 帖子: '字'.repeat(4000) } }); check('请求体超过 8 KB 被拒', r.status === 413, '状态 ' + r.status);
+r = await post('/llm', { slot: 'rest', payload: { 帖子: '字'.repeat(7000) } }); check('请求体超过 16 KB 被拒', r.status === 413, '状态 ' + r.status);
 r = await post('/llm', { slot: 'rest', payload: { 活动: '爬山' } }); const ok1 = await J(r);
 check('正常请求能通，模型的话能回来', r.status === 200 && ok1 && ok1.result && ok1.result.text === '好的', JSON.stringify(ok1));
 check('发给模型的是游戏的提示词', /逃出绝命课题组/.test(lastSystem));
